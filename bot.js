@@ -563,13 +563,21 @@ client.on('interactionCreate', async interaction => {
     }
     // Defer the reply and make it ephemeral
     await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+    
+    // Ensure server_stats record exists
+    await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
+    
     const { rows } = await db.query('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
-      const poolBalance = rows[0]?.pool_balance || 0;
-      const embed = new EmbedBuilder()
-        .setTitle('🏦 Server Pool Balance')
-        .setDescription(`The server pool currently holds **${poolBalance.toLocaleString('en-US')}** 💰.`)
-        .setColor('Aqua');
-      await interaction.editReply({ embeds: [embed] });
+    if (!rows || rows.length === 0) {
+      return await interaction.editReply({ content: '❌ Error: Could not access server pool. Please try again.' });
+    }
+    
+    const poolBalance = rows[0]?.pool_balance || 0;
+    const embed = new EmbedBuilder()
+      .setTitle('🏦 Server Pool Balance')
+      .setDescription(`The server pool currently holds **${poolBalance.toLocaleString('en-US')}** 💰.`)
+      .setColor('Aqua');
+    await interaction.editReply({ embeds: [embed] });
     } else if (commandName === 'give') {
       await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
       const adminIds = (process.env.ADMIN_IDS || '').split(',');
@@ -580,7 +588,14 @@ client.on('interactionCreate', async interaction => {
       const targetUser = interaction.options.getUser('user');
       const amount = interaction.options.getNumber('amount');
 
+      // Ensure server_stats record exists
+      await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
+      
       const { rows } = await db.query('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
+      if (!rows || rows.length === 0) {
+        return await interaction.editReply({ content: '❌ Error: Could not access server pool. Please try again.' });
+      }
+      
       const poolBalance = rows[0]?.pool_balance || 0;
 
       if (amount > poolBalance) {
@@ -604,8 +619,16 @@ client.on('interactionCreate', async interaction => {
       const targetUser = interaction.options.getUser('user');
       const amount = interaction.options.getNumber('amount');
 
+      // Ensure server_stats record exists
+      await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
+      
       await db.query('INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [targetUser.id]);
       const { rows } = await db.query('SELECT balance FROM users WHERE id = $1', [targetUser.id]);
+      
+      if (!rows || rows.length === 0) {
+        return await interaction.editReply({ content: '❌ Error: Could not access user balance. Please try again.' });
+      }
+      
       const currentBalance = rows[0]?.balance || 0;
       const newBalance = Math.max(0, currentBalance - amount); // Ensure balance doesn't go negative
       const amountTaken = currentBalance - newBalance;
@@ -741,8 +764,18 @@ client.on('interactionCreate', async interaction => {
       // Calculate prize per winner
       const prizePerWinner = Math.floor(totalPrize / winnerCount);
       
+      // Ensure server_stats record exists
+      await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
+      
       // Check if server pool has enough funds
       const { rows } = await db.query('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
+      if (!rows || rows.length === 0) {
+        return interaction.reply({ 
+          content: '❌ Error: Could not access server pool. Please try again.', 
+          flags: [MessageFlags.Ephemeral] 
+        });
+      }
+      
       const poolBalance = rows[0]?.pool_balance || 0;
 
       if (poolBalance < totalPrize) {
