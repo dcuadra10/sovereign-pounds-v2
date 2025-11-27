@@ -579,35 +579,48 @@ client.on('interactionCreate', async interaction => {
       .setColor('Aqua');
     await interaction.editReply({ embeds: [embed] });
     } else if (commandName === 'give') {
-      await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-      const adminIds = (process.env.ADMIN_IDS || '').split(',');
-      if (!adminIds.includes(interaction.user.id)) {
-        return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
+      try {
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        const adminIds = (process.env.ADMIN_IDS || '').split(',');
+        if (!adminIds.includes(interaction.user.id)) {
+          return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
+        }
+
+        const targetUser = interaction.options.getUser('user');
+        const amount = interaction.options.getNumber('amount');
+
+        if (!targetUser || !amount || amount <= 0) {
+          return await interaction.editReply({ content: '❌ Invalid user or amount provided.' });
+        }
+
+        // Ensure server_stats record exists
+        await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
+        
+        const result = await db.query('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
+        if (!result || !result.rows || result.rows.length === 0) {
+          return await interaction.editReply({ content: '❌ Error: Could not access server pool. Please try again.' });
+        }
+        
+        const poolBalance = result.rows[0]?.pool_balance || 0;
+
+        if (amount > poolBalance) {
+          return await interaction.editReply({ content: `❌ Not enough funds in the server pool! The pool only has **${poolBalance.toLocaleString('en-US')}** 💰.` });
+        }
+
+        await db.query('UPDATE server_stats SET pool_balance = pool_balance - $1 WHERE id = $2', [amount, interaction.guildId]);
+        await db.query('INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [targetUser.id]);
+        await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [amount, targetUser.id]);
+
+        await interaction.editReply({ content: `✅ Successfully gave **${amount.toLocaleString('en-US')}** 💰 to ${targetUser}.` });
+        logActivity('💸 Admin Give', `<@${interaction.user.id}> gave **${amount.toLocaleString('en-US')}** 💰 to ${targetUser}.`, 'Yellow');
+      } catch (error) {
+        console.error('Error giving currency:', error);
+        try {
+          await interaction.editReply({ content: `❌ Error giving currency: ${error.message}. Please check the console for more details.` });
+        } catch (replyError) {
+          console.error('Error replying to interaction:', replyError);
+        }
       }
-
-      const targetUser = interaction.options.getUser('user');
-      const amount = interaction.options.getNumber('amount');
-
-      // Ensure server_stats record exists
-      await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
-      
-      const { rows } = await db.query('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
-      if (!rows || rows.length === 0) {
-        return await interaction.editReply({ content: '❌ Error: Could not access server pool. Please try again.' });
-      }
-      
-      const poolBalance = rows[0]?.pool_balance || 0;
-
-      if (amount > poolBalance) {
-        return await interaction.editReply({ content: `❌ Not enough funds in the server pool! The pool only has **${poolBalance.toLocaleString('en-US')}** 💰.` });
-      }
-
-      await db.query('UPDATE server_stats SET pool_balance = pool_balance - $1 WHERE id = $2', [amount, interaction.guildId]);
-      await db.query('INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [targetUser.id]);
-      await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [amount, targetUser.id]);
-
-      await interaction.editReply({ content: `✅ Successfully gave **${amount.toLocaleString('en-US')}** 💰 to ${targetUser}.` });
-      logActivity('💸 Admin Give', `<@${interaction.user.id}> gave **${amount.toLocaleString('en-US')}** 💰 to ${targetUser}.`, 'Yellow');
 
     } else if (commandName === 'take') {
       await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
