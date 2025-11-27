@@ -1,7 +1,7 @@
 {
-  "name": "heavenly-pounds-bot",
+  "name": "sovereign-pounds-bot",
   "version": "1.0.0",
-  "description": "Discord bot for Heavenly Pounds currency system",
+  "description": "Discord bot for Sovereign Pounds currency system",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",

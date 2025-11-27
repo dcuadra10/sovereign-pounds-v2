@@ -1,1 +1,1 @@
-don't be a copy cat
+Sovereign Pounds Bot - Discord currency system bot

@@ -6,11 +6,11 @@ require('dotenv').config();
 const commands = [
   new SlashCommandBuilder()
     .setName('balance')
-    .setDescription('Check your Heavenly Pounds balance and inventory'),
+    .setDescription('Check your Sovereign Pounds balance and inventory'),
 
   new SlashCommandBuilder()
     .setName('shop')
-    .setDescription('View the shop to exchange Heavenly Pounds for resources'),
+    .setDescription('View the shop to exchange Sovereign Pounds for resources'),
 
   new SlashCommandBuilder()
     .setName('buy')
@@ -33,7 +33,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('daily')
-    .setDescription('Claim your daily Heavenly Pounds reward!'),
+    .setDescription('Claim your daily Sovereign Pounds reward!'),
 
   new SlashCommandBuilder()
     .setName('stats')
@@ -46,7 +46,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('leaderboard')
-    .setDescription('Shows the top users with the most Heavenly Pounds'),
+    .setDescription('Shows the top users with the most Sovereign Pounds'),
 
   new SlashCommandBuilder()
     .setName('pool')
@@ -54,27 +54,27 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('give')
-    .setDescription('Admin: Give Heavenly Pounds to a user from the server pool.')
+    .setDescription('Admin: Give Sovereign Pounds to a user from the server pool.')
     .addUserOption(option =>
       option.setName('user')
         .setDescription('The user to give currency to.')
         .setRequired(true))
     .addNumberOption(option =>
       option.setName('amount')
-        .setDescription('The amount of Heavenly Pounds to give.')
+        .setDescription('The amount of Sovereign Pounds to give.')
         .setRequired(true)
         .setMinValue(0.01)),
 
   new SlashCommandBuilder()
     .setName('take')
-    .setDescription('Admin: Take Heavenly Pounds from a user.')
+    .setDescription('Admin: Take Sovereign Pounds from a user.')
     .addUserOption(option =>
       option.setName('user')
         .setDescription('The user to take currency from.')
         .setRequired(true))
     .addNumberOption(option =>
       option.setName('amount')
-        .setDescription('The amount of Heavenly Pounds to take.')
+        .setDescription('The amount of Sovereign Pounds to take.')
         .setRequired(true)
         .setMinValue(0.01)),
 
@@ -87,7 +87,7 @@ const commands = [
         .setRequired(true))
     .addNumberOption(option =>
       option.setName('total_prize')
-        .setDescription('Total amount of Heavenly Pounds to be distributed among winners')
+        .setDescription('Total amount of Sovereign Pounds to be distributed among winners')
         .setRequired(true)
         .setMinValue(1))
     .addIntegerOption(option =>
@@ -98,7 +98,7 @@ const commands = [
         .setMaxValue(10))
     .addNumberOption(option =>
       option.setName('entry_cost')
-        .setDescription('Cost in Heavenly Pounds to participate (default: 10)')
+        .setDescription('Cost in Sovereign Pounds to participate (default: 10)')
         .setRequired(false)
         .setMinValue(1))
     .addRoleOption(option =>

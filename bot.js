@@ -213,7 +213,7 @@ client.on('guildMemberAdd', async member => {
     await db.query('INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [inviterId]);
     await db.query('UPDATE users SET balance = balance + 20 WHERE id = $1', [inviterId]);
     await db.query('INSERT INTO invites (user_id, invites) VALUES ($1, 1) ON CONFLICT (user_id) DO UPDATE SET invites = invites.invites + 1', [inviterId]);
-    logActivity('💌 Invite Reward', `<@${inviterId}> received **20** Heavenly Pounds for inviting ${member.user.tag}.`, 'Green');
+    logActivity('💌 Invite Reward', `<@${inviterId}> received **20** Sovereign Pounds for inviting ${member.user.tag}.`, 'Green');
   }
 });
 
@@ -238,7 +238,7 @@ client.on('messageCreate', async message => {
       const totalReward = rewardsToGive * 5;
       await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [totalReward, message.author.id]);
       await db.query('UPDATE message_counts SET rewarded_messages = rewarded_messages + $1 WHERE user_id = $2', [rewardsToGive * 100, message.author.id]);
-      logActivity('💬 Message Reward', `<@${message.author.id}> received **${totalReward}** Heavenly Pounds for sending ${rewardsToGive * 100} messages.`, 'Green');
+      logActivity('💬 Message Reward', `<@${message.author.id}> received **${totalReward}** Sovereign Pounds for sending ${rewardsToGive * 100} messages.`, 'Green');
   }
 });
 
@@ -269,7 +269,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
           const totalReward = rewardsToGive * 5;
           await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [totalReward, member.id]);
           await db.query('UPDATE voice_times SET rewarded_minutes = rewarded_minutes + $1 WHERE user_id = $2', [rewardsToGive * 60, member.id]);
-          logActivity('🎤 Voice Chat Reward', `<@${member.id}> received **${totalReward}** Heavenly Pounds for spending ${rewardsToGive * 60} minutes in voice chat.`, 'Green');
+          logActivity('🎤 Voice Chat Reward', `<@${member.id}> received **${totalReward}** Sovereign Pounds for spending ${rewardsToGive * 60} minutes in voice chat.`, 'Green');
         }
       }
     }
@@ -299,7 +299,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         // Update the total rewarded boosts for the server
         await db.query('INSERT INTO server_stats (id, rewarded_boosts) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET rewarded_boosts = $2', [guild.id, currentBoosts]);
         
-        logActivity('🚀 Server Boost Reward', `<@${newMember.id}> received **${reward}** Heavenly Pounds for **${newBoosts}** new boost(s).`, 'Gold');
+        logActivity('🚀 Server Boost Reward', `<@${newMember.id}> received **${reward}** Sovereign Pounds for **${newBoosts}** new boost(s).`, 'Gold');
       }
   }
 });
@@ -354,7 +354,7 @@ client.on('interactionCreate', async interaction => {
       const embed = new EmbedBuilder()
         .setTitle(`📊 Balance of ${interaction.user.username}`)
         .addFields(
-          { name: '💰 Heavenly Pounds', value: `**${(row?.balance || 0).toLocaleString('en-US')}**`, inline: true },
+          { name: '💰 Sovereign Pounds', value: `**${(row?.balance || 0).toLocaleString('en-US')}**`, inline: true },
           { name: '🪙 Gold', value: `${(row?.gold || 0).toLocaleString('en-US')}`, inline: true },
           { name: '🪵 Wood', value: `${(row?.wood || 0).toLocaleString('en-US')}`, inline: true },
           { name: '🌽 Food', value: `${(row?.food || 0).toLocaleString('en-US')}`, inline: true },
@@ -365,7 +365,7 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'shop') {
     const embed = new EmbedBuilder()
       .setTitle('🛍️ Heavenly Shop')
-      .setDescription('Exchange your Heavenly Pounds for resources. Use `/buy` to purchase.\n\n- **🪙 Gold:** 10 HP for 50,000\n- **🪵 Wood:** 10 HP for 150,000\n- **🌽 Food:** 10 HP for 150,000\n- **🪨 Stone:** 10 HP for 112,000');
+      .setDescription('Exchange your Sovereign Pounds for resources. Use `/buy` to purchase.\n\n- **🪙 Gold:** 10 HP for 50,000\n- **🪵 Wood:** 10 HP for 150,000\n- **🌽 Food:** 10 HP for 150,000\n- **🪨 Stone:** 10 HP for 112,000');
     interaction.reply({ embeds: [embed] });
     } else if (commandName === 'buy') {
     const resource = interaction.options.getString('resource');
@@ -389,11 +389,11 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'help') {
       await interaction.deferReply();
       const helpEmbed = new EmbedBuilder()
-        .setTitle('❓ Heavenly Pounds Help')
+        .setTitle('❓ Sovereign Pounds Help')
         .setColor('Green')
         .addFields(
           {
-            name: '💸 How to Earn Heavenly Pounds',
+            name: '💸 How to Earn Sovereign Pounds',
             value: '- **Invites**: Earn **20** 💰 for each person you invite.\n' +
                    '- **Messages**: Earn **5** 💰 for every 100 messages you send.\n' +
                    '- **Voice Chat**: Earn **5** 💰 for every hour you spend in a voice channel.\n' +
@@ -418,7 +418,7 @@ client.on('interactionCreate', async interaction => {
           },
           {
             name: '🎁 Giveaways',
-            value: 'Giveaways allow users to pay Heavenly Pounds to participate and win prizes!\n' +
+            value: 'Giveaways allow users to pay Sovereign Pounds to participate and win prizes!\n' +
                    '- Entry costs are paid from your balance and added to the server pool\n' +
                    '- Winners receive the prize amount from the server pool\n' +
                    '- Only admins can create giveaways'
@@ -523,7 +523,7 @@ client.on('interactionCreate', async interaction => {
 
       const top10Users = allUsers.slice(0, 10);
       const embed = new EmbedBuilder()
-        .setTitle('🏆 Heavenly Pounds Leaderboard')
+        .setTitle('🏆 Sovereign Pounds Leaderboard')
         .setColor('Gold');
 
       let description = '';
@@ -640,7 +640,7 @@ client.on('interactionCreate', async interaction => {
 
       const totalPrizeInput = new TextInputBuilder()
         .setCustomId('giveaway_total_prize')
-        .setLabel('Total Prize (Heavenly Pounds)')
+        .setLabel('Total Prize (Sovereign Pounds)')
         .setPlaceholder('Enter the total amount to distribute...')
         .setValue(totalPrize.toString())
         .setStyle(TextInputStyle.Short)
@@ -648,7 +648,7 @@ client.on('interactionCreate', async interaction => {
 
       const entryCostInput = new TextInputBuilder()
         .setCustomId('giveaway_entry_cost')
-        .setLabel('Entry Cost (Heavenly Pounds)')
+        .setLabel('Entry Cost (Sovereign Pounds)')
         .setPlaceholder('Enter the cost to participate...')
         .setValue(entryCost.toString())
         .setStyle(TextInputStyle.Short)
@@ -678,7 +678,7 @@ client.on('interactionCreate', async interaction => {
       const cost = parseShorthand(quantityString);
 
       if (isNaN(cost) || cost <= 0) {
-        return interaction.reply({ content: '⚠️ Please provide a valid quantity of Heavenly Pounds to spend.', flags: [MessageFlags.Ephemeral] });
+        return interaction.reply({ content: '⚠️ Please provide a valid quantity of Sovereign Pounds to spend.', flags: [MessageFlags.Ephemeral] });
       }
 
       // Define how many resources you get for 10 HP
@@ -689,7 +689,7 @@ client.on('interactionCreate', async interaction => {
       const desiredResourceAmount = Math.floor((cost / pricePerPackage) * quantities[resource]);
 
       if (desiredResourceAmount < 1) {
-        return interaction.reply({ content: '⚠️ The amount of Heavenly Pounds is too small to buy at least 1 unit of this resource.', flags: [MessageFlags.Ephemeral] });
+        return interaction.reply({ content: '⚠️ The amount of Sovereign Pounds is too small to buy at least 1 unit of this resource.', flags: [MessageFlags.Ephemeral] });
       }
 
       const confirmationEmbed = new EmbedBuilder()
@@ -812,12 +812,12 @@ client.on('interactionCreate', async interaction => {
 
     const { rows: userRows } = await db.query('SELECT balance FROM users WHERE id = $1', [interaction.user.id]);
       if ((userRows[0]?.balance || 0) < cost) {
-          return interaction.editReply({ content: `❌ Oops! You no longer have enough Heavenly Pounds.`, embeds: [], components: [] });
+          return interaction.editReply({ content: `❌ Oops! You no longer have enough Sovereign Pounds.`, embeds: [], components: [] });
         }
       await db.query(`UPDATE users SET balance = balance - $1, ${resource} = ${resource} + $2 WHERE id = $3`, [cost, resourceAmount, interaction.user.id]);
       await db.query('UPDATE server_stats SET pool_balance = pool_balance + $1 WHERE id = $2', [cost, interaction.guildId]);
         await interaction.editReply({ content: `✅ Success! You spent **${cost.toLocaleString('en-US')}** 💰 and received **${resourceAmount.toLocaleString('en-US')} ${resource}**!`, embeds: [], components: [] });
-        logActivity('🛒 Shop Purchase', `<@${interaction.user.id}> bought **${resourceAmount.toLocaleString('en-US')} ${resource}** for **${cost.toLocaleString('en-US')}** Heavenly Pounds.`, 'Blue')
+        logActivity('🛒 Shop Purchase', `<@${interaction.user.id}> bought **${resourceAmount.toLocaleString('en-US')} ${resource}** for **${cost.toLocaleString('en-US')}** Sovereign Pounds.`, 'Blue')
           .then(() => logPurchaseToSheet(interaction.user.username, resource, resourceAmount, cost));
     } else if (interaction.customId === 'cancel_buy') {
       await interaction.editReply({ content: 'Purchase canceled.', embeds: [], components: [] });
@@ -902,7 +902,7 @@ app.use((req, res, next) => {
 });
 
 app.get('/', (req, res) => {
-  res.send('Heavenly Pounds bot is alive!');
+  res.send('Sovereign Pounds bot is alive!');
 });
 
 // API endpoint to get real-time Discord server stats

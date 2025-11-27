@@ -1,7 +1,7 @@
 # Koyeb Service Configuration
-name: heavenly-pounds-bot
+name: sovereign-pounds-bot
 services:
-  - name: heavenly-pounds-bot
+  - name: sovereign-pounds-bot
     source:
       type: git
       repository: your-github-username/heavenly-pounds
