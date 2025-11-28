@@ -3,6 +3,8 @@ const { pool: db, initializeDatabase } = require('./database');
 const express = require('express');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 // Helper function to safely execute database queries
@@ -220,6 +222,33 @@ client.once(Events.ClientReady, async () => {
 
 client.on('guildMemberAdd', async member => {
   const guild = member.guild;
+  
+  // Send welcome message
+  try {
+    const welcomeChannelId = process.env.WELCOME_CHANNEL_ID;
+    if (welcomeChannelId) {
+      const welcomeChannel = await guild.channels.fetch(welcomeChannelId);
+      if (welcomeChannel && welcomeChannel.isTextBased()) {
+        const welcomeMessage = `✨ **Welcome To The Sovereign Empire** ✨\n{user} has entered the Project!!!⠀⠀\n⠀⠀⠀⠀⠀\n📜\n Check out ⁠📖〢ɪɴꜰᴏʀᴍᴀᴛɪᴏɴ or ⁠🔗〢ᴜꜱᴇꜰᴜʟㆍʟɪɴᴋꜱ to get to know the project more.\n🔐\n Head to ⁠☑️〢ᴠᴇʀɪꜰɪᴄᴀᴛɪᴏɴ to unlock the server.\n💬\n Need help or have questions? Reach out to the staff in ⁠👮🏼〢ᴛɪᴄᴋᴇᴛᴇʀ -Remember to create your ticket with the staff.`.replace('{user}', `<@${member.id}>`);
+        
+        // Try to attach the welcome video
+        const videoPath = path.join(__dirname, 'Welcome video.gif');
+        
+        if (fs.existsSync(videoPath)) {
+          await welcomeChannel.send({
+            content: welcomeMessage,
+            files: [videoPath]
+          });
+        } else {
+          await welcomeChannel.send(welcomeMessage);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error sending welcome message:', error);
+  }
+  
+  // Handle invite rewards
   const newInvites = await guild.invites.fetch();
   let inviterId = null;
   newInvites.forEach(invite => {
