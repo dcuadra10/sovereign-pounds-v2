@@ -5,6 +5,26 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 require('dotenv').config();
 
+// Helper function to safely execute database queries
+async function safeQuery(query, params = []) {
+  try {
+    const result = await db.query(query, params);
+    // Ensure result always has a rows array
+    if (!result || typeof result !== 'object') {
+      console.error('Database query returned invalid result:', result);
+      return { rows: [] };
+    }
+    if (!Array.isArray(result.rows)) {
+      console.error('Database query result.rows is not an array:', result);
+      return { rows: [] };
+    }
+    return result;
+  } catch (error) {
+    console.error('Database query error:', error);
+    return { rows: [] };
+  }
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -585,9 +605,9 @@ client.on('interactionCreate', async interaction => {
     
     try {
       // Ensure server_stats record exists
-      await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
+      await safeQuery('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
       
-      const result = await db.query('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
+      const result = await safeQuery('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
       if (!result || !result.rows || result.rows.length === 0) {
         return await interaction.editReply({ content: '❌ Error: Could not access server pool. Please try again.' });
       }
@@ -622,9 +642,9 @@ client.on('interactionCreate', async interaction => {
         }
 
         // Ensure server_stats record exists
-        await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
+        await safeQuery('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
         
-        const result = await db.query('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
+        const result = await safeQuery('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
         if (!result || !result.rows || result.rows.length === 0) {
           return await interaction.editReply({ content: '❌ Error: Could not access server pool. Please try again.' });
         }
