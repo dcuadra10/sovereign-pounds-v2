@@ -246,19 +246,20 @@ client.on('guildMemberAdd', async member => {
         const videoPath = path.join(__dirname, 'Welcome video.gif');
         
         if (fs.existsSync(videoPath)) {
-          // Send with video attached - Discord will display GIFs in embeds automatically
-          const message = await welcomeChannel.send({
-            embeds: [welcomeEmbed],
+          // First send message with video to get the URL
+          const tempMessage = await welcomeChannel.send({
             files: [{
               attachment: videoPath,
               name: 'welcome.gif'
             }]
           });
           
-          // Update embed with video URL if attachment was successful
-          if (message.attachments.size > 0) {
-            const attachmentUrl = message.attachments.first().url;
-            const updatedEmbed = new EmbedBuilder()
+          // Get the attachment URL
+          if (tempMessage.attachments.size > 0) {
+            const attachmentUrl = tempMessage.attachments.first().url;
+            
+            // Create embed with video in the image
+            const welcomeEmbedWithVideo = new EmbedBuilder()
               .setTitle('✨ Welcome To The Sovereign Empire ✨')
               .setDescription(`<@${member.id}> has entered the Project!!!⠀⠀\n\n📜 Check out <#${informationChannelId}> or <#${usefulLinksChannelId}> to get to know the project more.\n\n🔐 Head to <#${verificationChannelId}> to unlock the server.\n\n💬 Need help or have questions? Reach out to the staff in <#${ticketerChannelId}> -Remember to create your ticket with the staff.`)
               .setColor('Gold')
@@ -266,7 +267,11 @@ client.on('guildMemberAdd', async member => {
               .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
               .setImage(attachmentUrl);
             
-            await message.edit({ embeds: [updatedEmbed] });
+            // Send the embed with video (only in embed, no separate attachment)
+            await welcomeChannel.send({ embeds: [welcomeEmbedWithVideo] });
+            
+            // Delete the temporary message with the attachment
+            await tempMessage.delete().catch(err => console.error('Error deleting temp message:', err));
           }
         } else {
           console.log('Welcome video not found at:', videoPath);
