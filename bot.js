@@ -229,9 +229,15 @@ client.on('guildMemberAdd', async member => {
     if (welcomeChannelId) {
       const welcomeChannel = await guild.channels.fetch(welcomeChannelId);
       if (welcomeChannel && welcomeChannel.isTextBased()) {
+        // Channel IDs
+        const verificationChannelId = '1421649198331199619';
+        const informationChannelId = '1421306924363681912';
+        const usefulLinksChannelId = '1424495381202473141';
+        const ticketerChannelId = '1413983349969780787';
+        
         const welcomeEmbed = new EmbedBuilder()
           .setTitle('✨ Welcome To The Sovereign Empire ✨')
-          .setDescription(`<@${member.id}> has entered the Project!!!⠀⠀\n\n📜\nCheck out ⁠📖〢ɪɴꜰᴏʀᴍᴀᴛɪᴏɴ or ⁠🔗〢ᴜꜱᴇꜰᴜʟㆍʟɪɴᴋꜱ to get to know the project more.\n\n🔐\nHead to ⁠☑️〢ᴠᴇʀɪꜰɪᴄᴀᴛɪᴏɴ to unlock the server.\n\n💬\nNeed help or have questions? Reach out to the staff in ⁠👮🏼〢ᴛɪᴄᴋᴇᴛᴇʀ -Remember to create your ticket with the staff.`)
+          .setDescription(`<@${member.id}> has entered the Project!!!⠀⠀\n\n📜 Check out <#${informationChannelId}> or <#${usefulLinksChannelId}> to get to know the project more.\n\n🔐 Head to <#${verificationChannelId}> to unlock the server.\n\n💬 Need help or have questions? Reach out to the staff in <#${ticketerChannelId}> -Remember to create your ticket with the staff.`)
           .setColor('Gold')
           .setTimestamp()
           .setThumbnail(member.user.displayAvatarURL({ dynamic: true }));
@@ -240,13 +246,28 @@ client.on('guildMemberAdd', async member => {
         const videoPath = path.join(__dirname, 'Welcome video.gif');
         
         if (fs.existsSync(videoPath)) {
-          await welcomeChannel.send({
+          // Send with video attached - Discord will display GIFs in embeds automatically
+          const message = await welcomeChannel.send({
             embeds: [welcomeEmbed],
             files: [{
               attachment: videoPath,
               name: 'welcome.gif'
             }]
           });
+          
+          // Update embed with video URL if attachment was successful
+          if (message.attachments.size > 0) {
+            const attachmentUrl = message.attachments.first().url;
+            const updatedEmbed = new EmbedBuilder()
+              .setTitle('✨ Welcome To The Sovereign Empire ✨')
+              .setDescription(`<@${member.id}> has entered the Project!!!⠀⠀\n\n📜 Check out <#${informationChannelId}> or <#${usefulLinksChannelId}> to get to know the project more.\n\n🔐 Head to <#${verificationChannelId}> to unlock the server.\n\n💬 Need help or have questions? Reach out to the staff in <#${ticketerChannelId}> -Remember to create your ticket with the staff.`)
+              .setColor('Gold')
+              .setTimestamp()
+              .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+              .setImage(attachmentUrl);
+            
+            await message.edit({ embeds: [updatedEmbed] });
+          }
         } else {
           console.log('Welcome video not found at:', videoPath);
           await welcomeChannel.send({ embeds: [welcomeEmbed] });
