@@ -815,8 +815,10 @@ client.on('interactionCreate', async interaction => {
       }
 
       try {
+        console.log('🔄 Starting data reset...');
+        
         // Reset user balances and resources
-        await db.query(`
+        const usersResult = await db.query(`
           UPDATE users 
           SET balance = 0, 
               gold = 0, 
@@ -826,50 +828,59 @@ client.on('interactionCreate', async interaction => {
               daily_streak = 0,
               last_daily = NULL
         `);
+        console.log(`✅ Reset ${usersResult.rowCount || 0} user records`);
         
         // Reset message counts
-        await db.query(`
+        const messagesResult = await db.query(`
           UPDATE message_counts 
           SET count = 0, 
               rewarded_messages = 0
         `);
+        console.log(`✅ Reset ${messagesResult.rowCount || 0} message count records`);
         
         // Reset voice times
-        await db.query(`
+        const voiceResult = await db.query(`
           UPDATE voice_times 
           SET minutes = 0, 
               rewarded_minutes = 0
         `);
+        console.log(`✅ Reset ${voiceResult.rowCount || 0} voice time records`);
         
         // Reset invites
-        await db.query(`
+        const invitesResult = await db.query(`
           UPDATE invites 
           SET invites = 0
         `);
+        console.log(`✅ Reset ${invitesResult.rowCount || 0} invite records`);
         
         // Reset boosts
-        await db.query(`
+        const boostsResult = await db.query(`
           UPDATE boosts 
           SET boosts = 0
         `);
+        console.log(`✅ Reset ${boostsResult.rowCount || 0} boost records`);
         
         // Reset invited_members tracking
-        await db.query(`
+        const invitedResult = await db.query(`
           DELETE FROM invited_members
         `);
+        console.log(`✅ Deleted ${invitedResult.rowCount || 0} invited member records`);
         
-        // Reset server pool to default
+        // Ensure server_stats exists and reset pool to default
         await db.query(`
-          UPDATE server_stats 
-          SET pool_balance = 100000
-          WHERE id = $1
+          INSERT INTO server_stats (id, pool_balance) 
+          VALUES ($1, 100000) 
+          ON CONFLICT (id) 
+          DO UPDATE SET pool_balance = 100000
         `, [interaction.guildId]);
+        console.log(`✅ Reset server pool to 100,000`);
         
+        console.log('🎉 All data reset completed successfully!');
         await interaction.editReply({ content: '✅ **All data has been reset successfully!**\n\n- All user balances: **0** 💰\n- All resources (Gold, Wood, Food, Stone): **0**\n- All message counts: **0**\n- All voice times: **0**\n- All invites: **0**\n- All boosts: **0**\n- Server pool: **100,000** 💰\n- Invite tracking: **Cleared**' });
         logActivity('🔄 Admin Reset', `<@${interaction.user.id}> reset ALL user data (balances, stats, resources).`, 'Red');
       } catch (error) {
-        console.error('Error resetting data:', error);
-        await interaction.editReply({ content: '❌ Error resetting data. Please check the console for details.' });
+        console.error('❌ Error resetting data:', error);
+        await interaction.editReply({ content: `❌ Error resetting data: ${error.message}\n\nPlease check the console for more details.` });
       }
     } else if (commandName === 'giveaway') {
       const adminIds = (process.env.ADMIN_IDS || '').split(',');
