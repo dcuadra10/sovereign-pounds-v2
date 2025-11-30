@@ -3,8 +3,6 @@ const { pool: db, initializeDatabase } = require('./database');
 const express = require('express');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
-const fs = require('fs');
-const path = require('path');
 require('dotenv').config();
 
 // Helper function to safely execute database queries
@@ -309,41 +307,13 @@ client.on('guildMemberAdd', async member => {
           .setTimestamp()
           .setThumbnail(member.user.displayAvatarURL({ dynamic: true }));
         
-        // Try to attach the welcome video
-        const videoPath = path.join(__dirname, 'Welcome video.gif');
-        
-        if (fs.existsSync(videoPath)) {
-          // First send message with video to get the URL
-          const tempMessage = await welcomeChannel.send({
-            files: [{
-              attachment: videoPath,
-              name: 'welcome.gif'
-            }]
-          });
-          
-          // Get the attachment URL
-          if (tempMessage.attachments.size > 0) {
-            const attachmentUrl = tempMessage.attachments.first().url;
-            
-            // Create embed with video in the image
-            const welcomeEmbedWithVideo = new EmbedBuilder()
-              .setTitle('✨ Welcome To The Sovereign Empire ✨')
-              .setDescription(`<@${member.id}> has entered the Project!!!⠀⠀\n\n📜 Check out <#${informationChannelId}> or <#${usefulLinksChannelId}> to get to know the project more.\n\n🔐 Head to <#${verificationChannelId}> to unlock the server.\n\n💬 Need help or have questions? Reach out to the staff in <#${ticketerChannelId}> -Remember to create your ticket with the staff.`)
-              .setColor('Gold')
-              .setTimestamp()
-              .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-              .setImage(attachmentUrl);
-            
-            // Send the embed with video (only in embed, no separate attachment)
-            await welcomeChannel.send({ embeds: [welcomeEmbedWithVideo] });
-            
-            // Delete the temporary message with the attachment
-            await tempMessage.delete().catch(err => console.error('Error deleting temp message:', err));
-          }
-        } else {
-          console.log('Welcome video not found at:', videoPath);
-          await welcomeChannel.send({ embeds: [welcomeEmbed] });
+        // Add welcome video from URL if configured
+        const welcomeVideoUrl = process.env.WELCOME_VIDEO_URL;
+        if (welcomeVideoUrl) {
+          welcomeEmbed.setImage(welcomeVideoUrl);
         }
+        
+        await welcomeChannel.send({ embeds: [welcomeEmbed] });
       }
     }
   } catch (error) {
