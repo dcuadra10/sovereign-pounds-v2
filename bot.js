@@ -83,7 +83,7 @@ async function resetGoogleSheet() {
 
     const doc = new GoogleSpreadsheet(GOOGLE_SHEET_ID, jwt);
     await doc.loadInfo();
-    
+
     const sheetTitle = 'Purchases';
     let sheet = doc.sheetsByTitle[sheetTitle];
 
@@ -95,12 +95,12 @@ async function resetGoogleSheet() {
     // Get all rows
     const rows = await sheet.getRows();
     const rowCount = rows.length;
-    
+
     // Delete all rows
     for (const row of rows) {
       await row.delete();
     }
-    
+
     // Ensure headers are set
     try {
       await sheet.loadHeaderRow();
@@ -111,7 +111,7 @@ async function resetGoogleSheet() {
       // If loading header row fails, set headers
       await sheet.setHeaderRow(['Timestamp', 'User', 'Gold', 'Wood', 'Food', 'Stone', 'HP Cost']);
     }
-    
+
     console.log(`✅ Reset Google Sheet "${sheetTitle}": Deleted ${rowCount} rows`);
     return { success: true, message: `Reset Google Sheet: Deleted ${rowCount} rows` };
   } catch (error) {
@@ -138,7 +138,7 @@ async function logPurchaseToSheet(username, resource, resourceAmount, cost) {
 
     const doc = new GoogleSpreadsheet(GOOGLE_SHEET_ID, jwt);
     await doc.loadInfo();
-    
+
     const sheetTitle = 'Purchases';
     let sheet = doc.sheetsByTitle[sheetTitle];
 
@@ -231,7 +231,7 @@ function parseShorthand(value) {
 
   const lastChar = value.slice(-1).toLowerCase();
   const numPart = value.slice(0, -1);
-  
+
   if (!isNaN(numPart) && numPart !== '') {
     const num = parseFloat(numPart);
     switch (lastChar) {
@@ -287,7 +287,7 @@ client.once(Events.ClientReady, async () => {
 
 client.on('guildMemberAdd', async member => {
   const guild = member.guild;
-  
+
   // Send welcome message
   try {
     const welcomeChannelId = process.env.WELCOME_CHANNEL_ID;
@@ -299,27 +299,46 @@ client.on('guildMemberAdd', async member => {
         const informationChannelId = '1421306924363681912';
         const usefulLinksChannelId = '1424495381202473141';
         const ticketerChannelId = '1413983349969780787';
-        
-        const welcomeEmbed = new EmbedBuilder()
-          .setTitle('✨ Welcome To The Sovereign Empire ✨')
-          .setDescription(`<@${member.id}> has entered the Project!!!⠀⠀\n\n📜 Check out <#${informationChannelId}> or <#${usefulLinksChannelId}> to get to know the project more.\n\n🔐 Head to <#${verificationChannelId}> to unlock the server.\n\n💬 Need help or have questions? Reach out to the staff in <#${ticketerChannelId}> -Remember to create your ticket with the staff.`)
-          .setColor('Gold')
-          .setTimestamp()
-          .setThumbnail(member.user.displayAvatarURL({ dynamic: true }));
-        
-        // Add welcome video from URL if configured
-        const welcomeVideoUrl = process.env.WELCOME_VIDEO_URL;
-        if (welcomeVideoUrl) {
-          welcomeEmbed.setImage(welcomeVideoUrl);
-        }
-        
-        await welcomeChannel.send({ embeds: [welcomeEmbed] });
+
+        const welcomeVideoUrl = process.env.WELCOME_VIDEO_URL; // Define welcomeVideoUrl here
+
+        const welcomeContent =
+          `# ✨ Welcome To The Sovereign Empire ✨
+>>> <@${member.id}> has entered the Project!!!
+
+📜 Check out <#${informationChannelId}> or <#${usefulLinksChannelId}> to get to know the project more.
+
+🔐 Head to <#${verificationChannelId}> to unlock the server.
+
+💬 Need help or have questions? Reach out to the staff in <#${ticketerChannelId}> -Remember to create your ticket with the staff.${welcomeVideoUrl ? `\n\n${welcomeVideoUrl}` : ''}`;
+
+        const welcomeRow = new ActionRowBuilder()
+          .addComponents(
+            new ButtonBuilder()
+              .setLabel('📜 Information')
+              .setStyle(ButtonStyle.Link)
+              .setURL(`https://discord.com/channels/${guild.id}/${informationChannelId}`),
+            new ButtonBuilder()
+              .setLabel('🔗 Useful Links')
+              .setStyle(ButtonStyle.Link)
+              .setURL(`https://discord.com/channels/${guild.id}/${usefulLinksChannelId}`),
+            new ButtonBuilder()
+              .setLabel('🔐 Verification')
+              .setStyle(ButtonStyle.Link)
+              .setURL(`https://discord.com/channels/${guild.id}/${verificationChannelId}`),
+            new ButtonBuilder()
+              .setLabel('💬 Support')
+              .setStyle(ButtonStyle.Link)
+              .setURL(`https://discord.com/channels/${guild.id}/${ticketerChannelId}`)
+          );
+
+        await welcomeChannel.send({ content: welcomeContent, components: [welcomeRow] });
       }
     }
   } catch (error) {
     console.error('Error sending welcome message:', error);
   }
-  
+
   // Handle invite rewards
   const newInvites = await guild.invites.fetch();
   let inviterId = null;
@@ -336,19 +355,19 @@ client.on('guildMemberAdd', async member => {
       'SELECT * FROM invited_members WHERE inviter_id = $1 AND invited_member_id = $2',
       [inviterId, member.id]
     );
-    
+
     // Only give reward if this is the first time this member was invited by this inviter
     if (!checkResult.rows || checkResult.rows.length === 0) {
       await db.query('INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [inviterId]);
       await db.query('UPDATE users SET balance = balance + 20 WHERE id = $1', [inviterId]);
       await db.query('INSERT INTO invites (user_id, invites) VALUES ($1, 1) ON CONFLICT (user_id) DO UPDATE SET invites = invites.invites + 1', [inviterId]);
-      
+
       // Record that this member was invited by this inviter
       await db.query(
         'INSERT INTO invited_members (inviter_id, invited_member_id) VALUES ($1, $2) ON CONFLICT (inviter_id, invited_member_id) DO NOTHING',
         [inviterId, member.id]
       );
-      
+
       logActivity('💌 Invite Reward', `<@${inviterId}> received **20** Sovereign Pounds for inviting ${member.user.tag}.`, 'Green');
     } else {
       // Member was already invited before, no reward
@@ -363,22 +382,22 @@ client.on('messageCreate', async message => {
 
   // Increment total message count
   const { rows } = await db.query(`
-      INSERT INTO message_counts (user_id, count, rewarded_messages) 
-      VALUES ($1, 1, 0) 
-      ON CONFLICT (user_id) 
+      INSERT INTO message_counts (user_id, count, rewarded_messages)
+      VALUES ($1, 1, 0)
+      ON CONFLICT (user_id)
       DO UPDATE SET count = message_counts.count + 1
       RETURNING count, rewarded_messages
   `, [message.author.id]);
 
   const { count, rewarded_messages } = rows[0];
   const unrewardedCount = count - rewarded_messages;
-  
+
   if (unrewardedCount >= 100) {
-      const rewardsToGive = Math.floor(unrewardedCount / 100);
-      const totalReward = rewardsToGive * 5;
-      await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [totalReward, message.author.id]);
-      await db.query('UPDATE message_counts SET rewarded_messages = rewarded_messages + $1 WHERE user_id = $2', [rewardsToGive * 100, message.author.id]);
-      logActivity('💬 Message Reward', `<@${message.author.id}> received **${totalReward}** Sovereign Pounds for sending ${rewardsToGive * 100} messages.`, 'Green');
+    const rewardsToGive = Math.floor(unrewardedCount / 100);
+    const totalReward = rewardsToGive * 5;
+    await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [totalReward, message.author.id]);
+    await db.query('UPDATE message_counts SET rewarded_messages = rewarded_messages + $1 WHERE user_id = $2', [rewardsToGive * 100, message.author.id]);
+    logActivity('💬 Message Reward', `<@${message.author.id}> received **${totalReward}** Sovereign Pounds for sending ${rewardsToGive * 100} messages.`, 'Green');
   }
 });
 
@@ -445,45 +464,45 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
       return;
     }
     const rewardedBoosts = result.rows[0]?.rewarded_boosts || 0;
-      const newBoosts = currentBoosts - rewardedBoosts;
+    const newBoosts = currentBoosts - rewardedBoosts;
 
-      if (newBoosts > 0) {
-        const reward = newBoosts * 500;
-        await db.query('INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [newMember.id]);
-        await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [reward, newMember.id]);
-        
-        // Update the user's personal boost count
-        await db.query('INSERT INTO boosts (user_id, boosts) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET boosts = boosts.boosts + $2', [newMember.id, newBoosts]);
-        
-        // Update the total rewarded boosts for the server
-        await db.query('INSERT INTO server_stats (id, rewarded_boosts) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET rewarded_boosts = $2', [guild.id, currentBoosts]);
-        
-        logActivity('🚀 Server Boost Reward', `<@${newMember.id}> received **${reward}** Sovereign Pounds for **${newBoosts}** new boost(s).`, 'Gold');
-      }
+    if (newBoosts > 0) {
+      const reward = newBoosts * 500;
+      await db.query('INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [newMember.id]);
+      await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [reward, newMember.id]);
+
+      // Update the user's personal boost count
+      await db.query('INSERT INTO boosts (user_id, boosts) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET boosts = boosts.boosts + $2', [newMember.id, newBoosts]);
+
+      // Update the total rewarded boosts for the server
+      await db.query('INSERT INTO server_stats (id, rewarded_boosts) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET rewarded_boosts = $2', [guild.id, currentBoosts]);
+
+      logActivity('🚀 Server Boost Reward', `<@${newMember.id}> received **${reward}** Sovereign Pounds for **${newBoosts}** new boost(s).`, 'Gold');
+    }
   }
 });
 
 client.on('messageDelete', async (message) => {
   // Check if this is a giveaway message
   if (!message.embeds || message.embeds.length === 0) return;
-  
+
   const embed = message.embeds[0];
   if (!embed.footer || !embed.footer.text || !embed.footer.text.startsWith('Giveaway ID:')) return;
-  
+
   const giveawayId = embed.footer.text.replace('Giveaway ID: ', '');
-  
+
   try {
     // Find the giveaway in database
     const { rows } = await db.query('SELECT * FROM giveaways WHERE id = $1 AND ended = FALSE', [giveawayId]);
     if (rows.length === 0) return;
-    
+
     const giveaway = rows[0];
-    
+
     // Cancel the giveaway
     await cancelGiveaway(giveawayId, 'Message deleted');
-    
+
     logActivity('❌ Giveaway Cancelled', `Giveaway **${giveaway.prize}** was cancelled because the message was deleted.`, 'Red');
-    
+
   } catch (error) {
     console.error('Error handling giveaway message deletion:', error);
   }
@@ -507,20 +526,20 @@ client.on('interactionCreate', async interaction => {
 
     if (commandName === 'balance') {
       // Defer the reply to prevent interaction timeout
-      await interaction.deferReply(); 
+      await interaction.deferReply();
       const { rows } = await db.query('SELECT * FROM users WHERE id = $1', [interaction.user.id]);
       const row = rows[0];
-      const embed = new EmbedBuilder()
-        .setTitle(`📊 Balance of ${interaction.user.username}`)
-        .addFields(
-          { name: '💰 Sovereign Pounds', value: `**${(row?.balance || 0).toLocaleString('en-US')}**`, inline: true },
-          { name: '🪙 Gold', value: `${(row?.gold || 0).toLocaleString('en-US')}`, inline: true },
-          { name: '🪵 Wood', value: `${(row?.wood || 0).toLocaleString('en-US')}`, inline: true },
-          { name: '🌽 Food', value: `${(row?.food || 0).toLocaleString('en-US')}`, inline: true },
-          { name: '🪨 Stone', value: `${(row?.stone || 0).toLocaleString('en-US')}`, inline: true }
-        )
-        .setFooter({ text: 'Note: Resources (RSS) will be granted when the temple is conquered. If the project is canceled, all resources and currency will be lost.' });
-      await interaction.editReply({ embeds: [embed] });
+      const balanceContent =
+        `# 📊 Balance of ${interaction.user.username}
+>>> 💰 **Sovereign Pounds**: ${(row?.balance || 0).toLocaleString('en-US')}
+🪙 **Gold**: ${(row?.gold || 0).toLocaleString('en-US')}
+🪵 **Wood**: ${(row?.wood || 0).toLocaleString('en-US')}
+🌽 **Food**: ${(row?.food || 0).toLocaleString('en-US')}
+🪨 **Stone**: ${(row?.stone || 0).toLocaleString('en-US')}
+
+_Note: Resources (RSS) will be granted when the temple is conquered. If the project is canceled, all resources and currency will be lost._`;
+
+      await interaction.editReply({ content: balanceContent });
     } else if (commandName === 'shop') {
       try {
         const embed = new EmbedBuilder()
@@ -562,43 +581,36 @@ client.on('interactionCreate', async interaction => {
 
     } else if (commandName === 'help') {
       await interaction.deferReply();
-      const helpEmbed = new EmbedBuilder()
-        .setTitle('❓ Sovereign Pounds Help')
-        .setColor('Green')
-        .addFields(
-          {
-            name: '💸 How to Earn Sovereign Pounds',
-            value: '- **Invites**: Earn **20** 💰 for each person you invite.\n' +
-                   '- **Messages**: Earn **5** 💰 for every 100 messages you send.\n' +
-                   '- **Voice Chat**: Earn **5** 💰 for every hour you spend in a voice channel.\n' +
-                   '- **Server Boosts**: Earn **500** 💰 for each time you boost the server.'
-          },
-          {
-            name: '🤖 User Commands',
-            value: '`/balance`: Check your balance and resource inventory.\n' +
-                   '`/shop`: View and purchase resources from the shop.\n' +
-                   '`/daily`: Claim your daily reward with a streak bonus.\n' +
-                   '`/stats [user]`: Check your contribution stats.\n' +
-                   '`/leaderboard`: See the top 10 richest users and your rank.\n' +
-                   '`/help`: Shows this help message.'
-          },
-          {
-            name: '⚙️ Admin Commands',
-            value: '`/pool`: Check the server pool balance.\n' +
-                   '`/give <user> <amount>`: Give currency to a user from the pool.\n' +
-                   '`/take <user> <amount>`: Take currency from a user.\n' +
-                   '`/giveaway <duration> <total_prize> [winners] [entry_cost] [ping_role]`: Create a giveaway with flexible prize and entry cost.'
-          },
-          {
-            name: '🎁 Giveaways',
-            value: 'Giveaways allow users to pay Sovereign Pounds to participate and win prizes!\n' +
-                   '- Entry costs are paid from your balance and added to the server pool\n' +
-                   '- Winners receive the prize amount from the server pool\n' +
-                   '- Only admins can create giveaways'
-          },
-        );
-      await interaction.editReply({ embeds: [helpEmbed] });
-    }  else if (commandName === 'daily') {
+      const helpContent =
+        `# ❓ Sovereign Pounds Help
+>>> **💸 How to Earn Sovereign Pounds**
+- **Invites**: Earn **20** 💰 for each person you invite.
+- **Messages**: Earn **5** 💰 for every 100 messages you send.
+- **Voice Chat**: Earn **5** 💰 for every hour you spend in a voice channel.
+- **Server Boosts**: Earn **500** 💰 for each time you boost the server.
+
+**🤖 User Commands**
+\` /balance \`: Check your balance and resource inventory.
+\` /shop \`: View and purchase resources from the shop.
+\` /daily \`: Claim your daily reward with a streak bonus.
+\` /stats [user] \`: Check your contribution stats.
+\` /leaderboard \`: See the top 10 richest users and your rank.
+\` /help \`: Shows this help message.
+
+**⚙️ Admin Commands**
+\` /pool \`: Check the server pool balance.
+\` /give <user> <amount> \`: Give currency to a user from the pool.
+\` /take <user> <amount> \`: Take currency from a user.
+\` /giveaway <duration> <total_prize> [winners] [entry_cost] [ping_role] \`: Create a giveaway with flexible prize and entry cost.
+
+**🎁 Giveaways**
+Giveaways allow users to pay Sovereign Pounds to participate and win prizes!
+- Entry costs are paid from your balance and added to the server pool
+- Winners receive the prize amount from the server pool
+- Only admins can create giveaways`;
+
+      await interaction.editReply({ content: helpContent });
+    } else if (commandName === 'daily') {
       await interaction.deferReply();
       const userId = interaction.user.id;
       const today = new Date();
@@ -637,16 +649,18 @@ client.on('interactionCreate', async interaction => {
 
         await db.query('UPDATE users SET balance = balance + $1, last_daily = $2, daily_streak = $3 WHERE id = $4', [reward, todayStr, streak, userId]);
 
-        const replyEmbed = new EmbedBuilder()
-          .setTitle('🎉 Daily Reward Claimed! 🎉')
-          .setDescription(`You have received **${reward}** 💰!\nYour current streak is **${streak}** day(s).${streak >= 15 ? '\n\n🏆 **Maximum streak reached!** You are earning the maximum daily reward!' : ' Come back tomorrow to increase it!'}`)
-          .setColor('Gold');
-        await interaction.editReply({ embeds: [replyEmbed] });
+        const dailyContent =
+          `# 🎉 Daily Reward Claimed! 🎉
+>>> You have received **${reward}** 💰!
+Your current streak is **${streak}** day(s).
+${streak >= 15 ? '\n🏆 **Maximum streak reached!** You are earning the maximum daily reward!' : ' Come back tomorrow to increase it!'}`;
+
+        await interaction.editReply({ content: dailyContent });
         logActivity('🎁 Daily Reward', `<@${userId}> claimed their daily reward of **${reward}** 💰 (Streak: ${streak}).`, 'Aqua');
       } catch (err) {
         console.error(err);
-          return await interaction.editReply({ content: '❌ An error occurred while processing your daily reward.' });
-        }
+        return await interaction.editReply({ content: '❌ An error occurred while processing your daily reward.' });
+      }
     } else if (commandName === 'stats') {
       await interaction.deferReply();
       const targetUser = interaction.options.getUser('user');
@@ -654,7 +668,7 @@ client.on('interactionCreate', async interaction => {
       const isUserAdmin = adminIds.includes(interaction.user.id);
 
       if (targetUser && targetUser.id !== interaction.user.id && !isUserAdmin) {
-        return await interaction.editReply({ content: '🚫 You can only view your own stats. Only admins can view stats for other users.'});
+        return await interaction.editReply({ content: '🚫 You can only view your own stats. Only admins can view stats for other users.' });
       }
       const user = interaction.options.getUser('user') || interaction.user;
 
@@ -690,76 +704,76 @@ client.on('interactionCreate', async interaction => {
       });
 
     } else if (commandName === 'leaderboard') {
-    try {
-      await interaction.deferReply();
-      const { rows: allUsers } = await db.query('SELECT id, balance FROM users ORDER BY balance DESC');
+      try {
+        await interaction.deferReply();
+        const { rows: allUsers } = await db.query('SELECT id, balance FROM users ORDER BY balance DESC');
 
-      const top10Users = allUsers.slice(0, 10);
-      const embed = new EmbedBuilder()
-        .setTitle('🏆 Sovereign Pounds Leaderboard')
-        .setColor('Gold');
+        const top10Users = allUsers.slice(0, 10);
+        const embed = new EmbedBuilder()
+          .setTitle('🏆 Sovereign Pounds Leaderboard')
+          .setColor('Gold');
 
-      let description = '';
-      for (let i = 0; i < top10Users.length; i++) {
-        try {
-          const user = await client.users.fetch(top10Users[i].id);
-          const medal = ['🥇', '🥈', '🥉'][i] || `**${i + 1}.**`;
-          description += `${medal} <@${user.id}> - **${top10Users[i].balance.toLocaleString('en-US')}** 💰\n`;
-        } catch {
-          // User might not be in the server anymore
-          description += `**${i + 1}.** *Unknown User* - **${top10Users[i].balance.toLocaleString('en-US')}** 💰\n`;
+        let description = '';
+        for (let i = 0; i < top10Users.length; i++) {
+          try {
+            const user = await client.users.fetch(top10Users[i].id);
+            const medal = ['🥇', '🥈', '🥉'][i] || `**${i + 1}.**`;
+            description += `${medal} <@${user.id}> - **${top10Users[i].balance.toLocaleString('en-US')}** 💰\n`;
+          } catch {
+            // User might not be in the server anymore
+            description += `**${i + 1}.** *Unknown User* - **${top10Users[i].balance.toLocaleString('en-US')}** 💰\n`;
+          }
         }
-      }
 
-      if (description === '') {
-        description = 'The leaderboard is empty!';
-      }
+        if (description === '') {
+          description = 'The leaderboard is empty!';
+        }
 
-      // Find the user's rank and add it if they are not in the top 10
-      const userRankIndex = allUsers.findIndex(user => user.id === interaction.user.id);
-      if (userRankIndex !== -1 && userRankIndex >= 10) {
-        const userRank = userRankIndex + 1;
-        const userBalance = allUsers[userRankIndex].balance;
-        description += `\n...\n**${userRank}.** <@${interaction.user.id}> - **${userBalance.toLocaleString('en-US')}** 💰`;
-      }
+        // Find the user's rank and add it if they are not in the top 10
+        const userRankIndex = allUsers.findIndex(user => user.id === interaction.user.id);
+        if (userRankIndex !== -1 && userRankIndex >= 10) {
+          const userRank = userRankIndex + 1;
+          const userBalance = allUsers[userRankIndex].balance;
+          description += `\n...\n**${userRank}.** <@${interaction.user.id}> - **${userBalance.toLocaleString('en-US')}** 💰`;
+        }
 
-      embed.setDescription(description);
-      await interaction.editReply({ embeds: [embed] });
-    } catch (err) {
-      console.error(err);
+        embed.setDescription(description);
+        await interaction.editReply({ embeds: [embed] });
+      } catch (err) {
+        console.error(err);
         return await interaction.editReply({ content: '❌ An error occurred while fetching the leaderboard.' });
       }
     } else if (commandName === 'pool') {
-    const adminIds = (process.env.ADMIN_IDS || '').split(',');
-    if (!adminIds.includes(interaction.user.id)) {
-      return interaction.reply('🚫 You do not have permission to use this command.');
-    }
-    // Defer the reply and make it ephemeral
-    await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-    
-    try {
-      // Ensure server_stats record exists
-      await safeQuery('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
-      
-      const result = await safeQuery('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
-      if (!result || !result.rows || result.rows.length === 0) {
-        return await interaction.editReply({ content: '❌ Error: Could not access server pool. Please try again.' });
+      const adminIds = (process.env.ADMIN_IDS || '').split(',');
+      if (!adminIds.includes(interaction.user.id)) {
+        return interaction.reply('🚫 You do not have permission to use this command.');
       }
-      
-      const poolBalance = result.rows[0]?.pool_balance || 0;
-      const embed = new EmbedBuilder()
-        .setTitle('🏦 Server Pool Balance')
-        .setDescription(`The server pool currently holds **${poolBalance.toLocaleString('en-US')}** 💰.`)
-        .setColor('Aqua');
-      await interaction.editReply({ embeds: [embed] });
-    } catch (error) {
-      console.error('Error checking pool balance:', error);
+      // Defer the reply and make it ephemeral
+      await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
       try {
-        await interaction.editReply({ content: `❌ Error checking pool balance: ${error.message}. Please check the console for more details.` });
-      } catch (replyError) {
-        console.error('Error replying to interaction:', replyError);
+        // Ensure server_stats record exists
+        await safeQuery('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
+
+        const result = await safeQuery('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
+        if (!result || !result.rows || result.rows.length === 0) {
+          return await interaction.editReply({ content: '❌ Error: Could not access server pool. Please try again.' });
+        }
+
+        const poolBalance = result.rows[0]?.pool_balance || 0;
+        const embed = new EmbedBuilder()
+          .setTitle('🏦 Server Pool Balance')
+          .setDescription(`The server pool currently holds **${poolBalance.toLocaleString('en-US')}** 💰.`)
+          .setColor('Aqua');
+        await interaction.editReply({ embeds: [embed] });
+      } catch (error) {
+        console.error('Error checking pool balance:', error);
+        try {
+          await interaction.editReply({ content: `❌ Error checking pool balance: ${error.message}. Please check the console for more details.` });
+        } catch (replyError) {
+          console.error('Error replying to interaction:', replyError);
+        }
       }
-    }
     } else if (commandName === 'give') {
       try {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
@@ -777,12 +791,12 @@ client.on('interactionCreate', async interaction => {
 
         // Ensure server_stats record exists
         await safeQuery('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
-        
+
         const result = await safeQuery('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
         if (!result || !result.rows || result.rows.length === 0) {
           return await interaction.editReply({ content: '❌ Error: Could not access server pool. Please try again.' });
         }
-        
+
         const poolBalance = result.rows[0]?.pool_balance || 0;
 
         if (amount > poolBalance) {
@@ -797,12 +811,9 @@ client.on('interactionCreate', async interaction => {
         logActivity('💸 Admin Give', `<@${interaction.user.id}> gave **${amount.toLocaleString('en-US')}** 💰 to ${targetUser}.`, 'Yellow');
       } catch (error) {
         console.error('Error giving currency:', error);
-        try {
-          await interaction.editReply({ content: `❌ Error giving currency: ${error.message}. Please check the console for more details.` });
-        } catch (replyError) {
-          console.error('Error replying to interaction:', replyError);
-        }
+        await interaction.editReply({ content: '❌ An error occurred while giving currency.' });
       }
+
 
     } else if (commandName === 'take') {
       await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
@@ -816,14 +827,14 @@ client.on('interactionCreate', async interaction => {
 
       // Ensure server_stats record exists
       await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
-      
+
       await db.query('INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [targetUser.id]);
       const { rows } = await db.query('SELECT balance FROM users WHERE id = $1', [targetUser.id]);
-      
+
       if (!rows || rows.length === 0) {
         return await interaction.editReply({ content: '❌ Error: Could not access user balance. Please try again.' });
       }
-      
+
       const currentBalance = rows[0]?.balance || 0;
       const newBalance = Math.max(0, currentBalance - amount); // Ensure balance doesn't go negative
       const amountTaken = currentBalance - newBalance;
@@ -841,7 +852,7 @@ client.on('interactionCreate', async interaction => {
 
       try {
         console.log('🔄 Starting data reset...');
-        
+
         // Reset user balances and resources
         const usersResult = await db.query(`
           UPDATE users 
@@ -854,7 +865,7 @@ client.on('interactionCreate', async interaction => {
               last_daily = NULL
         `);
         console.log(`✅ Reset ${usersResult.rowCount || 0} user records`);
-        
+
         // Reset message counts
         const messagesResult = await db.query(`
           UPDATE message_counts 
@@ -862,7 +873,7 @@ client.on('interactionCreate', async interaction => {
               rewarded_messages = 0
         `);
         console.log(`✅ Reset ${messagesResult.rowCount || 0} message count records`);
-        
+
         // Reset voice times
         const voiceResult = await db.query(`
           UPDATE voice_times 
@@ -870,27 +881,27 @@ client.on('interactionCreate', async interaction => {
               rewarded_minutes = 0
         `);
         console.log(`✅ Reset ${voiceResult.rowCount || 0} voice time records`);
-        
+
         // Reset invites
         const invitesResult = await db.query(`
           UPDATE invites 
           SET invites = 0
         `);
         console.log(`✅ Reset ${invitesResult.rowCount || 0} invite records`);
-        
+
         // Reset boosts
         const boostsResult = await db.query(`
           UPDATE boosts 
           SET boosts = 0
         `);
         console.log(`✅ Reset ${boostsResult.rowCount || 0} boost records`);
-        
+
         // Reset invited_members tracking
         const invitedResult = await db.query(`
           DELETE FROM invited_members
         `);
         console.log(`✅ Deleted ${invitedResult.rowCount || 0} invited member records`);
-        
+
         // Ensure server_stats exists and reset pool to default
         await db.query(`
           INSERT INTO server_stats (id, pool_balance) 
@@ -899,7 +910,7 @@ client.on('interactionCreate', async interaction => {
           DO UPDATE SET pool_balance = 100000
         `, [interaction.guildId]);
         console.log(`✅ Reset server pool to 100,000`);
-        
+
         // Reset Google Sheet
         const sheetResetResult = await resetGoogleSheet();
         if (sheetResetResult.success) {
@@ -907,9 +918,9 @@ client.on('interactionCreate', async interaction => {
         } else {
           console.log(`⚠️ Google Sheet reset failed: ${sheetResetResult.message}`);
         }
-        
+
         console.log('🎉 All data reset completed successfully!');
-        const resetMessage = '✅ **All data has been reset successfully!**\n\n- All user balances: **0** 💰\n- All resources (Gold, Wood, Food, Stone): **0**\n- All message counts: **0**\n- All voice times: **0**\n- All invites: **0**\n- All boosts: **0**\n- Server pool: **100,000** 💰\n- Invite tracking: **Cleared**' + 
+        const resetMessage = '✅ **All data has been reset successfully!**\n\n- All user balances: **0** 💰\n- All resources (Gold, Wood, Food, Stone): **0**\n- All message counts: **0**\n- All voice times: **0**\n- All invites: **0**\n- All boosts: **0**\n- Server pool: **100,000** 💰\n- Invite tracking: **Cleared**' +
           (sheetResetResult.success ? '\n- Google Sheet: **Reset** ✅' : '\n- Google Sheet: **Reset failed** ⚠️');
         await interaction.editReply({ content: resetMessage });
         logActivity('🔄 Admin Reset', `<@${interaction.user.id}> reset ALL user data (balances, stats, resources${sheetResetResult.success ? ', Google Sheet' : ''}).`, 'Red');
@@ -1016,7 +1027,7 @@ client.on('interactionCreate', async interaction => {
       const totalPrize = parseFloat(interaction.fields.getTextInputValue('giveaway_total_prize'));
       const entryCost = parseFloat(interaction.fields.getTextInputValue('giveaway_entry_cost'));
       const winnerCount = parseInt(interaction.fields.getTextInputValue('giveaway_winners'));
-      
+
       // Extract pingRole from customId
       const pingRoleId = interaction.customId.split('_')[3];
       const pingRole = pingRoleId && pingRoleId !== 'none' ? interaction.guild.roles.cache.get(pingRoleId) : null;
@@ -1040,28 +1051,28 @@ client.on('interactionCreate', async interaction => {
 
       const endTime = Date.now() + duration;
       const giveawayId = `giveaway_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
+
       // Calculate prize per winner
       const prizePerWinner = Math.floor(totalPrize / winnerCount);
-      
+
       // Ensure server_stats record exists
       await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
-      
+
       // Check if server pool has enough funds
       const result = await db.query('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
       if (!result || !result.rows || result.rows.length === 0) {
-        return interaction.reply({ 
-          content: '❌ Error: Could not access server pool. Please try again.', 
-          flags: [MessageFlags.Ephemeral] 
+        return interaction.reply({
+          content: '❌ Error: Could not access server pool. Please try again.',
+          flags: [MessageFlags.Ephemeral]
         });
       }
-      
+
       const poolBalance = result.rows[0]?.pool_balance || 0;
 
       if (poolBalance < totalPrize) {
-        return interaction.reply({ 
-          content: `❌ Not enough funds in server pool! Need **${totalPrize.toLocaleString('en-US')}** 💰 but pool only has **${poolBalance.toLocaleString('en-US')}** 💰.`, 
-          flags: [MessageFlags.Ephemeral] 
+        return interaction.reply({
+          content: `❌ Not enough funds in server pool! Need **${totalPrize.toLocaleString('en-US')}** 💰 but pool only has **${poolBalance.toLocaleString('en-US')}** 💰.`,
+          flags: [MessageFlags.Ephemeral]
         });
       }
 
@@ -1089,13 +1100,13 @@ client.on('interactionCreate', async interaction => {
       const allowedMentions = pingRole ? { roles: [pingRole.id] } : undefined;
 
       // Send the giveaway message
-      const giveawayMessage = await interaction.reply({ 
+      const giveawayMessage = await interaction.reply({
         content: content,
-        embeds: [giveawayEmbed], 
+        embeds: [giveawayEmbed],
         components: [row],
         allowedMentions: allowedMentions
       });
-      
+
       // Get the reply message for database storage
       const replyMessage = await interaction.fetchReply();
 
@@ -1116,7 +1127,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('buy_') && ['buy_gold', 'buy_wood', 'buy_food', 'buy_stone'].includes(interaction.customId)) {
       // Handle shop buy buttons - show modal
       const resource = interaction.customId.split('_')[1];
-      
+
       const modal = new ModalBuilder()
         .setCustomId(`buy_modal_${resource}`)
         .setTitle(`Buy ${resource.charAt(0).toUpperCase() + resource.slice(1)}`);
@@ -1142,20 +1153,20 @@ client.on('interactionCreate', async interaction => {
       const cost = parseFloat(costStr);
       const resourceAmount = parseInt(resourceAmountStr, 10);
 
-    const { rows: userRows } = await db.query('SELECT balance FROM users WHERE id = $1', [interaction.user.id]);
+      const { rows: userRows } = await db.query('SELECT balance FROM users WHERE id = $1', [interaction.user.id]);
       if ((userRows[0]?.balance || 0) < cost) {
-          return interaction.editReply({ content: `❌ Oops! You no longer have enough Sovereign Pounds.`, embeds: [], components: [] });
-        }
+        return interaction.editReply({ content: `❌ Oops! You no longer have enough Sovereign Pounds.`, embeds: [], components: [] });
+      }
       await db.query(`UPDATE users SET balance = balance - $1, ${resource} = ${resource} + $2 WHERE id = $3`, [cost, resourceAmount, interaction.user.id]);
       await db.query('UPDATE server_stats SET pool_balance = pool_balance + $1 WHERE id = $2', [cost, interaction.guildId]);
-        await interaction.editReply({ content: `✅ Success! You spent **${cost.toLocaleString('en-US')}** 💰 and received **${resourceAmount.toLocaleString('en-US')} ${resource}**!`, embeds: [], components: [] });
-        logActivity('🛒 Shop Purchase', `<@${interaction.user.id}> bought **${resourceAmount.toLocaleString('en-US')} ${resource}** for **${cost.toLocaleString('en-US')}** Sovereign Pounds.`, 'Blue')
-          .then(() => logPurchaseToSheet(interaction.user.username, resource, resourceAmount, cost));
+      await interaction.editReply({ content: `✅ Success! You spent **${cost.toLocaleString('en-US')}** 💰 and received **${resourceAmount.toLocaleString('en-US')} ${resource}**!`, embeds: [], components: [] });
+      logActivity('🛒 Shop Purchase', `<@${interaction.user.id}> bought **${resourceAmount.toLocaleString('en-US')} ${resource}** for **${cost.toLocaleString('en-US')}** Sovereign Pounds.`, 'Blue')
+        .then(() => logPurchaseToSheet(interaction.user.username, resource, resourceAmount, cost));
     } else if (interaction.customId === 'cancel_buy') {
       await interaction.editReply({ content: 'Purchase canceled.', embeds: [], components: [] });
     } else if (interaction.customId.startsWith('join_giveaway_')) {
       const giveawayId = interaction.customId.replace('join_giveaway_', '');
-      
+
       try {
         // Get giveaway info
         const { rows } = await db.query('SELECT * FROM giveaways WHERE id = $1', [giveawayId]);
@@ -1164,7 +1175,7 @@ client.on('interactionCreate', async interaction => {
         }
 
         const giveaway = rows[0];
-        
+
         // Check if giveaway has ended
         if (new Date() > new Date(giveaway.end_time)) {
           return interaction.editReply({ content: '❌ This giveaway has already ended.' });
@@ -1182,7 +1193,7 @@ client.on('interactionCreate', async interaction => {
         const userBalance = userRows[0]?.balance || 0;
 
         if (userBalance < giveaway.entry_cost) {
-          return interaction.editReply({ 
+          return interaction.editReply({
             content: `❌ You need **${giveaway.entry_cost.toLocaleString('en-US')}** 💰 to join this giveaway. You only have **${userBalance.toLocaleString('en-US')}** 💰.`
           });
         }
@@ -1190,9 +1201,9 @@ client.on('interactionCreate', async interaction => {
         // Check if user has excluded roles
         const userRoleIds = interaction.member.roles.cache.map(role => role.id);
         const hasExcludedRole = userRoleIds.some(roleId => EXCLUDED_GIVEAWAY_ROLES.includes(roleId));
-        
+
         if (hasExcludedRole) {
-          return interaction.editReply({ 
+          return interaction.editReply({
             content: `❌ You cannot join this giveaway due to your current roles. Please contact an administrator if you believe this is an error.`
           });
         }
@@ -1209,7 +1220,7 @@ client.on('interactionCreate', async interaction => {
         // Update the giveaway embed to show new participant count
         await updateGiveawayEmbed(giveawayId, participants.length);
 
-        await interaction.editReply({ 
+        await interaction.editReply({
           content: `✅ You have successfully joined the giveaway! **${giveaway.entry_cost.toLocaleString('en-US')}** 💰 entry cost deducted from your balance.`
         });
 
@@ -1244,10 +1255,10 @@ app.get('/api/guild-info', async (req, res) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET');
     res.header('Access-Control-Allow-Headers', 'Content-Type');
-    
+
     if (!client.isReady()) {
-      return res.status(503).json({ 
-        error: 'Bot not ready', 
+      return res.status(503).json({
+        error: 'Bot not ready',
         serverName: 'Heavens of Glory',
         status: 'Offline',
         totalMembers: 0,
@@ -1268,8 +1279,8 @@ app.get('/api/guild-info', async (req, res) => {
 
     // Fetch all members to count online status
     const members = await guild.members.fetch();
-    const onlineCount = members.filter(m => 
-      !m.user.bot && 
+    const onlineCount = members.filter(m =>
+      !m.user.bot &&
       ['online', 'dnd', 'idle'].includes(m.presence?.status)
     ).size;
 
@@ -1285,8 +1296,8 @@ app.get('/api/guild-info', async (req, res) => {
 
   } catch (error) {
     console.error('[API /guild-info] Error:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to fetch guild info', 
+    res.status(500).json({
+      error: 'Failed to fetch guild info',
       details: error.message,
       serverName: 'Heavens of Glory',
       status: 'Error',
@@ -1320,7 +1331,7 @@ function setupHealthchecksPing() {
       })
       .catch(err => console.error('Failed to ping Healthchecks.io:', err.message));
   };
-  
+
   ping();
   setInterval(ping, 50 * 1000); // 50 seconds
 }
@@ -1338,10 +1349,10 @@ async function updateGiveawayEmbed(giveawayId, participantCount) {
 
     // Find the giveaway message
     const messages = await channel.messages.fetch({ limit: 50 });
-    const giveawayMessage = messages.find(msg => 
-      msg.embeds.length > 0 && 
-      msg.embeds[0].footer && 
-      msg.embeds[0].footer.text && 
+    const giveawayMessage = messages.find(msg =>
+      msg.embeds.length > 0 &&
+      msg.embeds[0].footer &&
+      msg.embeds[0].footer.text &&
       msg.embeds[0].footer.text.includes(giveawayId)
     );
 
@@ -1349,12 +1360,12 @@ async function updateGiveawayEmbed(giveawayId, participantCount) {
 
     // Create updated embed
     const prizePerWinner = Math.floor((giveaway.total_prize || giveaway.entry_cost * giveaway.winner_count) / giveaway.winner_count);
-    
+
     // Check if there are enough participants and set appropriate color/warning
     const hasEnoughParticipants = participantCount >= giveaway.winner_count;
     const embedColor = hasEnoughParticipants ? 'Gold' : 'Orange';
     const warningText = !hasEnoughParticipants ? `\n\n⚠️ **Warning:** Need at least ${giveaway.winner_count} participants! (Currently: ${participantCount})` : '';
-    
+
     const updatedEmbed = new EmbedBuilder()
       .setTitle('🎉 Giveaway! 🎉')
       .setDescription(`**Total Prize:** ${(giveaway.total_prize || giveaway.entry_cost * giveaway.winner_count).toLocaleString('en-US')} 💰\n**Prize per Winner:** ${prizePerWinner.toLocaleString('en-US')} 💰\n**Entry Cost:** ${giveaway.entry_cost.toLocaleString('en-US')} 💰\n**Participants:** ${participantCount}\n**Winners:** ${giveaway.winner_count}\n**Ends:** <t:${Math.floor(new Date(giveaway.end_time).getTime() / 1000)}:R>${warningText}`)
@@ -1433,7 +1444,7 @@ async function endGiveaway(giveawayId) {
       // No participants, refund to pool
       await db.query('UPDATE server_stats SET pool_balance = pool_balance + $1 WHERE id = $2', [giveaway.entry_cost * giveaway.winner_count, giveaway.guild_id]);
       await db.query('UPDATE giveaways SET ended = TRUE WHERE id = $1', [giveawayId]);
-      
+
       const channel = await client.channels.fetch(giveaway.channel_id);
       if (channel) {
         const embed = new EmbedBuilder()
@@ -1503,9 +1514,9 @@ async function endGiveaway(giveawayId) {
           // Try to send ephemeral message to the winner
           const winner = await client.users.fetch(winnerId);
           if (winner) {
-            await winner.send({ 
+            await winner.send({
               content: `🎉 **Congratulations!** You won the giveaway in <#${giveawayChannel.id}>! 🎊`,
-              embeds: [winnerEmbed] 
+              embeds: [winnerEmbed]
             });
           }
         } catch (error) {
@@ -1523,17 +1534,17 @@ async function endGiveaway(giveawayId) {
     if (channel) {
       const winnerMentions = winners.map(id => `<@${id}>`).join(', ');
       const totalPrize = giveaway.total_prize || giveaway.entry_cost * giveaway.winner_count;
-      
+
       const winnerEmbed = new EmbedBuilder()
         .setTitle('🎉 GIVEAWAY ENDED! 🎉')
         .setDescription(`**🎁 Total Prize Pool:** ${totalPrize.toLocaleString('en-US')} 💰\n**👥 Participants:** ${participants.length}\n**🏆 Winner(s):** ${winnerMentions}\n\n**💰 Each winner received:** ${prizePerWinner.toLocaleString('en-US')} 💰!\n\nCongratulations to the winners! 🎊`)
         .setColor('Gold')
         .setFooter({ text: `Giveaway ID: ${giveawayId}` })
         .setTimestamp();
-      
-      await channel.send({ 
+
+      await channel.send({
         content: `🎉 **GIVEAWAY RESULTS** 🎉\n\n**Winner(s):** ${winnerMentions}\n\nCongratulations! 🎊`,
-        embeds: [winnerEmbed] 
+        embeds: [winnerEmbed]
       });
     }
 

@@ -134,6 +134,9 @@ async function initializeDatabase() {
       console.log('Migration note:', err.message);
     }
 
+    // Server Growth Tracking
+
+
     console.log('Database tables checked/created successfully.');
   } catch (err) {
     console.error('Error initializing database:', err);
