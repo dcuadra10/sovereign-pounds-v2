@@ -1,9 +1,9 @@
+require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, Events, MessageFlags, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { pool: db, initializeDatabase } = require('./database');
 const express = require('express');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
-require('dotenv').config();
 
 // Helper function to safely execute database queries
 async function safeQuery(query, params = []) {

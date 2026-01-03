@@ -1,12 +1,15 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-if (!process.env.DATABASE_URL) {
-  throw new Error('FATAL ERROR: DATABASE_URL environment variable is not set. Please set it in your hosting provider (e.g., Koyeb).');
+const connectionString = process.env.DATABASE_URL || process.env.DB_PATH;
+
+if (!connectionString) {
+  throw new Error('FATAL ERROR: DATABASE_URL (or DB_PATH) environment variable is not set. Please set it in your hosting provider.');
 }
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: connectionString,
+  ssl: { rejectUnauthorized: false } // Add SSL setting just in case for cloud DBs
 });
 
 async function initializeDatabase() {
