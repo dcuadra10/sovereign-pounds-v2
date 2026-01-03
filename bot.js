@@ -25,6 +25,35 @@ async function safeQuery(query, params = []) {
   }
 }
 
+// Helper function to parse duration string (e.g. 1d, 2h, 30m)
+function parseDuration(durationStr) {
+  if (!durationStr) return null;
+  const match = durationStr.toLowerCase().match(/^(\d+)([dhms])$/);
+  if (!match) return null;
+  const value = parseInt(match[1]);
+  const unit = match[2];
+  switch (unit) {
+    case 'd': return value * 24 * 60 * 60 * 1000;
+    case 'h': return value * 60 * 60 * 1000;
+    case 'm': return value * 60 * 1000;
+    case 's': return value * 1000;
+    default: return null;
+  }
+}
+
+// Helper function to parse shorthand numbers (e.g. 1k, 1.5m)
+function parseShorthand(str) {
+  if (!str) return NaN;
+  const match = str.toLowerCase().replace(/,/g, '').match(/^([\d.]+)([kmb])?$/);
+  if (!match) return NaN;
+  let val = parseFloat(match[1]);
+  const multiplier = match[2];
+  if (multiplier === 'k') val *= 1000;
+  else if (multiplier === 'm') val *= 1000000;
+  else if (multiplier === 'b') val *= 1000000000;
+  return Math.floor(val);
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
