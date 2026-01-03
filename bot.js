@@ -303,16 +303,9 @@ client.on('guildMemberAdd', async member => {
         const welcomeVideoUrl = process.env.WELCOME_VIDEO_URL; // Define welcomeVideoUrl here
 
         const welcomeEmbed = new EmbedBuilder()
-          .setTitle('✨ Welcome To The Sovereign Empire ✨')
-          .setDescription(`<@${member.id}> has entered the Project!!!⠀⠀\n\n📜 Check out <#${informationChannelId}> or <#${usefulLinksChannelId}> to get to know the project more.\n\n🔐 Head to <#${verificationChannelId}> to unlock the server.\n\n💬 Need help or have questions? Reach out to the staff in <#${ticketerChannelId}> -Remember to create your ticket with the staff.`)
+          .setDescription(`# Welcome to Sovereign Empire\n<@${member.id}>\n\n> 📜 <#${informationChannelId}>\n> 🔗 <#${usefulLinksChannelId}>\n> 🔐 <#${verificationChannelId}>\n> 💬 <#${ticketerChannelId}>`)
           .setColor('Gold')
-          .setTimestamp()
-          .setThumbnail(member.user.displayAvatarURL({ dynamic: true }));
-
-        // Add welcome video from URL if configured
-        if (welcomeVideoUrl) {
-          welcomeEmbed.setImage(welcomeVideoUrl);
-        }
+          .setImage(process.env.WELCOME_VIDEO_URL || null);
 
         const welcomeRow = new ActionRowBuilder()
           .addComponents(
@@ -532,22 +525,23 @@ client.on('interactionCreate', async interaction => {
       const { rows } = await db.query('SELECT * FROM users WHERE id = $1', [interaction.user.id]);
       const row = rows[0];
       const embed = new EmbedBuilder()
-        .setTitle(`📊 Balance of ${interaction.user.username}`)
-        .addFields(
-          { name: '💰 Sovereign Pounds', value: `**${(row?.balance || 0).toLocaleString('en-US')}**`, inline: true },
-          { name: '🪙 Gold', value: `${(row?.gold || 0).toLocaleString('en-US')}`, inline: true },
-          { name: '🪵 Wood', value: `${(row?.wood || 0).toLocaleString('en-US')}`, inline: true },
-          { name: '🌽 Food', value: `${(row?.food || 0).toLocaleString('en-US')}`, inline: true },
-          { name: '🪨 Stone', value: `${(row?.stone || 0).toLocaleString('en-US')}`, inline: true }
-        )
-        .setFooter({ text: 'Note: Resources (RSS) will be granted when the temple is conquered. If the project is canceled, all resources and currency will be lost.' });
+        .setColor('Blue')
+        .setDescription(`# 📊 ${interaction.user.username}'s Balance\n\n` +
+          `💰 **${(row?.balance || 0).toLocaleString('en-US')}** Sovereign Pounds\n\n` +
+          `**Inventory**\n` +
+          `🪙 Gold: ${(row?.gold || 0).toLocaleString('en-US')}\n` +
+          `🪵 Wood: ${(row?.wood || 0).toLocaleString('en-US')}\n` +
+          `🌽 Food: ${(row?.food || 0).toLocaleString('en-US')}\n` +
+          `🪨 Stone: ${(row?.stone || 0).toLocaleString('en-US')}\n\n` +
+          `*Resources granted upon temple conquest.*`
+        );
 
       await interaction.editReply({ embeds: [embed] });
     } else if (commandName === 'shop') {
       try {
         const embed = new EmbedBuilder()
-          .setTitle('🛍️ Sovereign Shop')
-          .setDescription('Click a button below to purchase resources with your Sovereign Pounds.\n\n- **🪙 Gold:** 10 HP for 50,000\n- **🪵 Wood:** 10 HP for 150,000\n- **🌽 Food:** 10 HP for 150,000\n- **🪨 Stone:** 10 HP for 112,000');
+          .setColor('Blue')
+          .setDescription('# 🛍️ Shop\nSelect a resource to purchase.\n\n> **Price:** 10 HP per package.');
 
         const goldButton = new ButtonBuilder()
           .setCustomId('buy_gold')
@@ -585,40 +579,23 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'help') {
       await interaction.deferReply();
       const helpEmbed = new EmbedBuilder()
-        .setTitle('❓ Sovereign Pounds Help')
-        .setColor('Green')
-        .addFields(
-          {
-            name: '💸 How to Earn Sovereign Pounds',
-            value: '- **Invites**: Earn **20** 💰 for each person you invite.\n' +
-              '- **Messages**: Earn **5** 💰 for every 100 messages you send.\n' +
-              '- **Voice Chat**: Earn **5** 💰 for every hour you spend in a voice channel.\n' +
-              '- **Server Boosts**: Earn **500** 💰 for each time you boost the server.'
-          },
-          {
-            name: '🤖 User Commands',
-            value: '`/balance`: Check your balance and resource inventory.\n' +
-              '`/shop`: View and purchase resources from the shop.\n' +
-              '`/daily`: Claim your daily reward with a streak bonus.\n' +
-              '`/stats [user]`: Check your contribution stats.\n' +
-              '`/leaderboard`: See the top 10 richest users and your rank.\n' +
-              '`/help`: Shows this help message.'
-          },
-          {
-            name: '⚙️ Admin Commands',
-            value: '`/pool`: Check the server pool balance.\n' +
-              '`/give <user> <amount>`: Give currency to a user from the pool.\n' +
-              '`/take <user> <amount>`: Take currency from a user.\n' +
-              '`/giveaway <duration> <total_prize> [winners] [entry_cost] [ping_role]`: Create a giveaway with flexible prize and entry cost.'
-          },
-          {
-            name: '🎁 Giveaways',
-            value: 'Giveaways allow users to pay Sovereign Pounds to participate and win prizes!\n' +
-              '- Entry costs are paid from your balance and added to the server pool\n' +
-              '- Winners receive the prize amount from the server pool\n' +
-              '- Only admins can create giveaways'
-          },
-        );
+        .setColor('2B2D31')
+        .setDescription(`# Command List
+        
+**Earn Currency**
+> **Invites**: 20 💰
+> **Messages**: 5 💰 / 100 msgs
+> **Voice**: 5 💰 / hour
+> **Boosts**: 500 💰
+
+**User Commands**
+\`/balance\` \`/shop\` \`/daily\`
+\`/stats\` \`/leaderboard\` \`/help\`
+
+**Admin Commands**
+\`/pool\` \`/give\` \`/take\`
+\`/giveaway\``);
+
       await interaction.editReply({ embeds: [helpEmbed] });
     } else if (commandName === 'daily') {
       await interaction.deferReply();
@@ -660,9 +637,9 @@ client.on('interactionCreate', async interaction => {
         await db.query('UPDATE users SET balance = balance + $1, last_daily = $2, daily_streak = $3 WHERE id = $4', [reward, todayStr, streak, userId]);
 
         const replyEmbed = new EmbedBuilder()
-          .setTitle('🎉 Daily Reward Claimed! 🎉')
-          .setDescription(`You have received **${reward}** 💰!\nYour current streak is **${streak}** day(s).${streak >= 15 ? '\n\n🏆 **Maximum streak reached!** You are earning the maximum daily reward!' : ' Come back tomorrow to increase it!'}`)
-          .setColor('Gold');
+          .setColor('Gold')
+          .setDescription(`## 🎉 Daily Reward\nReceived **${reward}** 💰\nStreak: ${streak} days`);
+
         await interaction.editReply({ embeds: [replyEmbed] });
         logActivity('🎁 Daily Reward', `<@${userId}> claimed their daily reward of **${reward}** 💰 (Streak: ${streak}).`, 'Aqua');
       } catch (err) {
@@ -862,9 +839,8 @@ client.on('interactionCreate', async interaction => {
         const row = new ActionRowBuilder().addComponents(selectMenu);
 
         const panelEmbed = new EmbedBuilder()
-          .setTitle('🎫 Support Tickets')
-          .setDescription('Please select a category below to open a ticket.\nOur staff team will assist you as soon as possible.')
-          .setColor('Blue');
+          .setColor('2B2D31')
+          .setDescription('# 🎫 Tickets\nSelect a category to contact support.');
 
         const sentMessage = await channel.send({ embeds: [panelEmbed], components: [row] });
 
