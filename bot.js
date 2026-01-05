@@ -668,7 +668,7 @@ client.on('interactionCreate', async interaction => {
           items.slice(0, 20).forEach(item => {
             const stockDisplay = item.stock === -1 ? '♾️ Infinite' : item.stock;
             const itemDesc = item.description ? `\n> *${item.description}*` : '';
-            description += `> ${item.emoji || '📦'} **${item.name}** — **${item.price.toLocaleString('en-US')}** 💰\n> 📦 Stock: ${stockDisplay}${itemDesc}\n\n`;
+            description += `> ${item.emoji || '📦'} **${item.name}** \`ID: ${item.id}\` — **${item.price.toLocaleString('en-US')}** 💰\n> 📦 Stock: ${stockDisplay}${itemDesc}\n\n`;
           });
           if (items.length > 20) description += `\n*(...and ${items.length - 20} more items in the menu)*`;
         } else {
