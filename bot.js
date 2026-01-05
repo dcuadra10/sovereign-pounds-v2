@@ -1447,56 +1447,55 @@ client.on('interactionCreate', async interaction => {
       console.error(err);
       await interaction.reply({ content: '❌ Failed to remove user from the thread.' });
     }
-  }
-} else if (commandName === 'ticket-panel-edit') {
-  const adminIds = (process.env.ADMIN_IDS || '').split(',');
-  if (!adminIds.includes(interaction.user.id)) {
-    return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
-  }
+  } else if (commandName === 'ticket-panel-edit') {
+    const adminIds = (process.env.ADMIN_IDS || '').split(',');
+    if (!adminIds.includes(interaction.user.id)) {
+      return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
+    }
 
-  const channel = interaction.options.getChannel('channel');
-  const messageId = interaction.options.getString('message_id');
-  const title = interaction.options.getString('title');
-  const description = interaction.options.getString('description');
-  const imageUrl = interaction.options.getString('image_url');
-  const thumbnailUrl = interaction.options.getString('thumbnail_url');
+    const channel = interaction.options.getChannel('channel');
+    const messageId = interaction.options.getString('message_id');
+    const title = interaction.options.getString('title');
+    const description = interaction.options.getString('description');
+    const imageUrl = interaction.options.getString('image_url');
+    const thumbnailUrl = interaction.options.getString('thumbnail_url');
 
-  try {
-    if (!channel.isTextBased()) return interaction.reply({ content: 'Invalid channel type.', ephemeral: true });
-    const message = await channel.messages.fetch(messageId);
-    if (!message) return interaction.reply({ content: 'Message not found.', ephemeral: true });
+    try {
+      if (!channel.isTextBased()) return interaction.reply({ content: 'Invalid channel type.', ephemeral: true });
+      const message = await channel.messages.fetch(messageId);
+      if (!message) return interaction.reply({ content: 'Message not found.', ephemeral: true });
 
-    if (message.author.id !== client.user.id) return interaction.reply({ content: 'I can only edit my own messages.', ephemeral: true });
+      if (message.author.id !== client.user.id) return interaction.reply({ content: 'I can only edit my own messages.', ephemeral: true });
 
-    const oldEmbed = message.embeds[0];
-    if (!oldEmbed) return interaction.reply({ content: 'Message has no embed to edit.', ephemeral: true });
+      const oldEmbed = message.embeds[0];
+      if (!oldEmbed) return interaction.reply({ content: 'Message has no embed to edit.', ephemeral: true });
 
-    const newEmbed = EmbedBuilder.from(oldEmbed);
-    if (title) newEmbed.setTitle(title);
-    if (description) newEmbed.setDescription(description);
-    if (imageUrl) newEmbed.setImage(imageUrl);
-    if (thumbnailUrl) newEmbed.setThumbnail(thumbnailUrl);
+      const newEmbed = EmbedBuilder.from(oldEmbed);
+      if (title) newEmbed.setTitle(title);
+      if (description) newEmbed.setDescription(description);
+      if (imageUrl) newEmbed.setImage(imageUrl);
+      if (thumbnailUrl) newEmbed.setThumbnail(thumbnailUrl);
 
-    await message.edit({ embeds: [newEmbed] });
-    await interaction.reply({ content: '✅ Ticket panel updated successfully.', ephemeral: true });
+      await message.edit({ embeds: [newEmbed] });
+      await interaction.reply({ content: '✅ Ticket panel updated successfully.', ephemeral: true });
 
-  } catch (error) {
-    console.error('Error editing panel:', error);
-    await interaction.reply({ content: `❌ Failed to edit panel: ${error.message}`, ephemeral: true });
-  }
+    } catch (error) {
+      console.error('Error editing panel:', error);
+      await interaction.reply({ content: `❌ Failed to edit panel: ${error.message}`, ephemeral: true });
+    }
 
-} else if (commandName === 'reset-all') {
-  await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-  const adminIds = (process.env.ADMIN_IDS || '').split(',');
-  if (!adminIds.includes(interaction.user.id)) {
-    return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
-  }
+  } else if (commandName === 'reset-all') {
+    await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+    const adminIds = (process.env.ADMIN_IDS || '').split(',');
+    if (!adminIds.includes(interaction.user.id)) {
+      return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
+    }
 
-  try {
-    console.log('🔄 Starting data reset...');
+    try {
+      console.log('🔄 Starting data reset...');
 
-    // Reset user balances and resources
-    const usersResult = await db.query(`
+      // Reset user balances and resources
+      const usersResult = await db.query(`
           UPDATE users 
           SET balance = 0, 
               gold = 0, 
@@ -1506,149 +1505,149 @@ client.on('interactionCreate', async interaction => {
               daily_streak = 0,
               last_daily = NULL
         `);
-    console.log(`✅ Reset ${usersResult.rowCount || 0} user records`);
+      console.log(`✅ Reset ${usersResult.rowCount || 0} user records`);
 
-    // Reset message counts
-    const messagesResult = await db.query(`
+      // Reset message counts
+      const messagesResult = await db.query(`
           UPDATE message_counts 
           SET count = 0, 
               rewarded_messages = 0
         `);
-    console.log(`✅ Reset ${messagesResult.rowCount || 0} message count records`);
+      console.log(`✅ Reset ${messagesResult.rowCount || 0} message count records`);
 
-    // Reset voice times
-    const voiceResult = await db.query(`
+      // Reset voice times
+      const voiceResult = await db.query(`
           UPDATE voice_times 
           SET minutes = 0, 
               rewarded_minutes = 0
         `);
-    console.log(`✅ Reset ${voiceResult.rowCount || 0} voice time records`);
+      console.log(`✅ Reset ${voiceResult.rowCount || 0} voice time records`);
 
-    // Reset invites
-    const invitesResult = await db.query(`
+      // Reset invites
+      const invitesResult = await db.query(`
           UPDATE invites 
           SET invites = 0
         `);
-    console.log(`✅ Reset ${invitesResult.rowCount || 0} invite records`);
+      console.log(`✅ Reset ${invitesResult.rowCount || 0} invite records`);
 
-    // Reset boosts
-    const boostsResult = await db.query(`
+      // Reset boosts
+      const boostsResult = await db.query(`
           UPDATE boosts 
           SET boosts = 0
         `);
-    console.log(`✅ Reset ${boostsResult.rowCount || 0} boost records`);
+      console.log(`✅ Reset ${boostsResult.rowCount || 0} boost records`);
 
-    // Reset invited_members tracking
-    const invitedResult = await db.query(`
+      // Reset invited_members tracking
+      const invitedResult = await db.query(`
           DELETE FROM invited_members
         `);
-    console.log(`✅ Deleted ${invitedResult.rowCount || 0} invited member records`);
+      console.log(`✅ Deleted ${invitedResult.rowCount || 0} invited member records`);
 
-    // Ensure server_stats exists and reset pool to default
-    await db.query(`
+      // Ensure server_stats exists and reset pool to default
+      await db.query(`
           INSERT INTO server_stats (id, pool_balance) 
           VALUES ($1, 100000) 
           ON CONFLICT (id) 
           DO UPDATE SET pool_balance = 100000
         `, [interaction.guildId]);
-    console.log(`✅ Reset server pool to 100,000`);
+      console.log(`✅ Reset server pool to 100,000`);
 
-    // Reset Google Sheet
-    const sheetResetResult = await resetGoogleSheet();
-    if (sheetResetResult.success) {
-      console.log(`✅ ${sheetResetResult.message}`);
-    } else {
-      console.log(`⚠️ Google Sheet reset failed: ${sheetResetResult.message}`);
+      // Reset Google Sheet
+      const sheetResetResult = await resetGoogleSheet();
+      if (sheetResetResult.success) {
+        console.log(`✅ ${sheetResetResult.message}`);
+      } else {
+        console.log(`⚠️ Google Sheet reset failed: ${sheetResetResult.message}`);
+      }
+
+      console.log('🎉 All data reset completed successfully!');
+      const resetMessage = '✅ **All data has been reset successfully!**\n\n- All user balances: **0** 💰\n- All resources (Gold, Wood, Food, Stone): **0**\n- All message counts: **0**\n- All voice times: **0**\n- All invites: **0**\n- All boosts: **0**\n- Server pool: **100,000** 💰\n- Invite tracking: **Cleared**' +
+        (sheetResetResult.success ? '\n- Google Sheet: **Reset** ✅' : '\n- Google Sheet: **Reset failed** ⚠️');
+      await interaction.editReply({ content: resetMessage });
+      logActivity('🔄 Admin Reset', `<@${interaction.user.id}> reset ALL user data (balances, stats, resources${sheetResetResult.success ? ', Google Sheet' : ''}).`, 'Red');
+    } catch (error) {
+      console.error('❌ Error resetting data:', error);
+      await interaction.editReply({ content: `❌ Error resetting data: ${error.message}\n\nPlease check the console for more details.` });
+    }
+  } else if (commandName === 'add-emoji') {
+    const adminIds = (process.env.ADMIN_IDS || '').split(',');
+    if (!adminIds.includes(interaction.user.id)) {
+      return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
     }
 
-    console.log('🎉 All data reset completed successfully!');
-    const resetMessage = '✅ **All data has been reset successfully!**\n\n- All user balances: **0** 💰\n- All resources (Gold, Wood, Food, Stone): **0**\n- All message counts: **0**\n- All voice times: **0**\n- All invites: **0**\n- All boosts: **0**\n- Server pool: **100,000** 💰\n- Invite tracking: **Cleared**' +
-      (sheetResetResult.success ? '\n- Google Sheet: **Reset** ✅' : '\n- Google Sheet: **Reset failed** ⚠️');
-    await interaction.editReply({ content: resetMessage });
-    logActivity('🔄 Admin Reset', `<@${interaction.user.id}> reset ALL user data (balances, stats, resources${sheetResetResult.success ? ', Google Sheet' : ''}).`, 'Red');
-  } catch (error) {
-    console.error('❌ Error resetting data:', error);
-    await interaction.editReply({ content: `❌ Error resetting data: ${error.message}\n\nPlease check the console for more details.` });
+    const image = interaction.options.getAttachment('image');
+    const name = interaction.options.getString('name');
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      // Upload to Bot Application (Global Emojis)
+      await client.application.fetch();
+      const emoji = await client.application.emojis.create({ attachment: image.url, name: name });
+      await interaction.editReply({ content: `✅ **Bot Emoji** created successfully! ${emoji}\nID: \`${emoji.id}\`\nUsage: \`${emoji.toString()}\`` });
+    } catch (error) {
+      console.error('Error creating app emoji:', error);
+      // Fallback to Guild Emoji? The user explicitly asked for Bot Emoji.
+      await interaction.editReply({ content: `❌ Failed to create **Bot** emoji. Error: ${error.message}\n\n*Make sure the bot is owned by you or a Team and has slots available.*` });
+    }
+
+  } else if (commandName === 'giveaway') {
+    const adminIds = (process.env.ADMIN_IDS || '').split(',');
+    if (!adminIds.includes(interaction.user.id)) {
+      return interaction.reply('🚫 You do not have permission to use this command.');
+    }
+
+    const duration = interaction.options.getString('duration');
+    const totalPrize = interaction.options.getNumber('total_prize');
+    const winnerCount = interaction.options.getInteger('winners') || 1;
+    const entryCost = interaction.options.getNumber('entry_cost') || 10; // Default to 10 if not specified
+    const pingRole = interaction.options.getRole('ping_role') || (DEFAULT_GIVEAWAY_PING_ROLE ? interaction.guild.roles.cache.get(DEFAULT_GIVEAWAY_PING_ROLE) : null);
+
+    const modal = new ModalBuilder()
+      .setCustomId(`giveaway_modal_${Date.now()}_${pingRole?.id || 'none'}`)
+      .setTitle('Create Giveaway');
+
+    const durationInput = new TextInputBuilder()
+      .setCustomId('giveaway_duration')
+      .setLabel('Duration (e.g., 1h, 30m, 2d)')
+      .setPlaceholder('1h, 30m, 2d...')
+      .setValue(duration)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    const totalPrizeInput = new TextInputBuilder()
+      .setCustomId('giveaway_total_prize')
+      .setLabel('Total Prize (Sovereign Pounds)')
+      .setPlaceholder('Enter the total amount to distribute...')
+      .setValue(totalPrize.toString())
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    const entryCostInput = new TextInputBuilder()
+      .setCustomId('giveaway_entry_cost')
+      .setLabel('Entry Cost (Sovereign Pounds)')
+      .setPlaceholder('Enter the cost to participate...')
+      .setValue(entryCost.toString())
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    const winnersInput = new TextInputBuilder()
+      .setCustomId('giveaway_winners')
+      .setLabel('Number of Winners')
+      .setPlaceholder('1')
+      .setValue(winnerCount.toString())
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(durationInput),
+      new ActionRowBuilder().addComponents(totalPrizeInput),
+      new ActionRowBuilder().addComponents(entryCostInput),
+      new ActionRowBuilder().addComponents(winnersInput)
+    );
+
+    await interaction.showModal(modal);
   }
-} else if (commandName === 'add-emoji') {
-  const adminIds = (process.env.ADMIN_IDS || '').split(',');
-  if (!adminIds.includes(interaction.user.id)) {
-    return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
-  }
-
-  const image = interaction.options.getAttachment('image');
-  const name = interaction.options.getString('name');
-
-  await interaction.deferReply({ ephemeral: true });
-
-  try {
-    // Upload to Bot Application (Global Emojis)
-    await client.application.fetch();
-    const emoji = await client.application.emojis.create({ attachment: image.url, name: name });
-    await interaction.editReply({ content: `✅ **Bot Emoji** created successfully! ${emoji}\nID: \`${emoji.id}\`\nUsage: \`${emoji.toString()}\`` });
-  } catch (error) {
-    console.error('Error creating app emoji:', error);
-    // Fallback to Guild Emoji? The user explicitly asked for Bot Emoji.
-    await interaction.editReply({ content: `❌ Failed to create **Bot** emoji. Error: ${error.message}\n\n*Make sure the bot is owned by you or a Team and has slots available.*` });
-  }
-
-} else if (commandName === 'giveaway') {
-  const adminIds = (process.env.ADMIN_IDS || '').split(',');
-  if (!adminIds.includes(interaction.user.id)) {
-    return interaction.reply('🚫 You do not have permission to use this command.');
-  }
-
-  const duration = interaction.options.getString('duration');
-  const totalPrize = interaction.options.getNumber('total_prize');
-  const winnerCount = interaction.options.getInteger('winners') || 1;
-  const entryCost = interaction.options.getNumber('entry_cost') || 10; // Default to 10 if not specified
-  const pingRole = interaction.options.getRole('ping_role') || (DEFAULT_GIVEAWAY_PING_ROLE ? interaction.guild.roles.cache.get(DEFAULT_GIVEAWAY_PING_ROLE) : null);
-
-  const modal = new ModalBuilder()
-    .setCustomId(`giveaway_modal_${Date.now()}_${pingRole?.id || 'none'}`)
-    .setTitle('Create Giveaway');
-
-  const durationInput = new TextInputBuilder()
-    .setCustomId('giveaway_duration')
-    .setLabel('Duration (e.g., 1h, 30m, 2d)')
-    .setPlaceholder('1h, 30m, 2d...')
-    .setValue(duration)
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
-
-  const totalPrizeInput = new TextInputBuilder()
-    .setCustomId('giveaway_total_prize')
-    .setLabel('Total Prize (Sovereign Pounds)')
-    .setPlaceholder('Enter the total amount to distribute...')
-    .setValue(totalPrize.toString())
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
-
-  const entryCostInput = new TextInputBuilder()
-    .setCustomId('giveaway_entry_cost')
-    .setLabel('Entry Cost (Sovereign Pounds)')
-    .setPlaceholder('Enter the cost to participate...')
-    .setValue(entryCost.toString())
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
-
-  const winnersInput = new TextInputBuilder()
-    .setCustomId('giveaway_winners')
-    .setLabel('Number of Winners')
-    .setPlaceholder('1')
-    .setValue(winnerCount.toString())
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
-
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(durationInput),
-    new ActionRowBuilder().addComponents(totalPrizeInput),
-    new ActionRowBuilder().addComponents(entryCostInput),
-    new ActionRowBuilder().addComponents(winnersInput)
-  );
-
-  await interaction.showModal(modal);
-}
 } else if (interaction.isStringSelectMenu()) {
   if (interaction.customId === 'shop_buy_select') {
     const itemId = interaction.values[0];
