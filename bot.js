@@ -1596,57 +1596,7 @@ client.on('interactionCreate', async interaction => {
     if (!adminIds.includes(interaction.user.id)) {
       return interaction.reply('🚫 You do not have permission to use this command.');
     }
-
-    const duration = interaction.options.getString('duration');
-    const totalPrize = interaction.options.getNumber('total_prize');
-    const winnerCount = interaction.options.getInteger('winners') || 1;
-    const entryCost = interaction.options.getNumber('entry_cost') || 10; // Default to 10 if not specified
-    const pingRole = interaction.options.getRole('ping_role') || (DEFAULT_GIVEAWAY_PING_ROLE ? interaction.guild.roles.cache.get(DEFAULT_GIVEAWAY_PING_ROLE) : null);
-
-    const modal = new ModalBuilder()
-      .setCustomId(`giveaway_modal_${Date.now()}_${pingRole?.id || 'none'}`)
-      .setTitle('Create Giveaway');
-
-    const durationInput = new TextInputBuilder()
-      .setCustomId('giveaway_duration')
-      .setLabel('Duration (e.g., 1h, 30m, 2d)')
-      .setPlaceholder('1h, 30m, 2d...')
-      .setValue(duration)
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
-
-    const totalPrizeInput = new TextInputBuilder()
-      .setCustomId('giveaway_total_prize')
-      .setLabel('Total Prize (Sovereign Pounds)')
-      .setPlaceholder('Enter the total amount to distribute...')
-      .setValue(totalPrize.toString())
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
-
-    const entryCostInput = new TextInputBuilder()
-      .setCustomId('giveaway_entry_cost')
-      .setLabel('Entry Cost (Sovereign Pounds)')
-      .setPlaceholder('Enter the cost to participate...')
-      .setValue(entryCost.toString())
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
-
-    const winnersInput = new TextInputBuilder()
-      .setCustomId('giveaway_winners')
-      .setLabel('Number of Winners')
-      .setPlaceholder('1')
-      .setValue(winnerCount.toString())
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(durationInput),
-      new ActionRowBuilder().addComponents(totalPrizeInput),
-      new ActionRowBuilder().addComponents(entryCostInput),
-      new ActionRowBuilder().addComponents(winnersInput)
-    );
-
-    await interaction.showModal(modal);
+    await interaction.reply({ content: "Giveaway command is temporarily disabled for debugging.", ephemeral: true });
   }
 } else if (interaction.isStringSelectMenu()) {
   if (interaction.customId === 'shop_buy_select') {
