@@ -935,11 +935,12 @@ client.on('interactionCreate', async interaction => {
       const role = interaction.options.getRole('role');
       const resource = interaction.options.getString('resource');
       const quantity = interaction.options.getInteger('quantity') || 1;
+      const requiresTicket = interaction.options.getBoolean('requires_ticket') || false;
 
       try {
         await safeQuery(
-          'INSERT INTO shop_items (name, price, emoji, description, role_id, resource_type, quantity) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-          [name, price, emoji, description, role?.id, resource, quantity]
+          'INSERT INTO shop_items (name, price, emoji, description, role_id, resource_type, quantity, requires_ticket) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+          [name, price, emoji, description, role?.id, resource, quantity, requiresTicket ? 1 : 0]
         );
         await interaction.reply({ content: `✅ Added item **${name}** (x${quantity}) to the shop for **${price}** 💰.`, ephemeral: true });
       } catch (error) {
@@ -1343,6 +1344,35 @@ client.on('interactionCreate', async interaction => {
           if (role) {
             await interaction.member.roles.add(role);
             rewardMsg += ` Assigned role **${role.name}**.`;
+          }
+        }
+
+        if (item.requires_ticket) {
+          try {
+            const safeName = (item.name || 'item').replace(/[^a-zA-Z0-9-]/g, '');
+            const threadName = `order-${interaction.user.username}-${safeName}`.substring(0, 32);
+
+            const thread = await interaction.channel.threads.create({
+              name: threadName,
+              type: ChannelType.PrivateThread,
+              autoArchiveDuration: 1440,
+              reason: 'Shop Purchase Ticket'
+            });
+            await thread.members.add(interaction.user.id);
+
+            const orderEmbed = new EmbedBuilder()
+              .setTitle('🛍️ New Order')
+              .setDescription(`User <@${interaction.user.id}> purchased **${item.name}**.\n\n**Price:** ${item.price.toLocaleString('en-US')} 💰\n**Status:** Paid ✅\n\nPlease describe your request below. Staff will be with you shortly.`)
+              .setColor('Green');
+
+            const adminIds = (process.env.ADMIN_IDS || '').split(',');
+            const adminPings = adminIds.map(id => `<@${id}>`).join(' ');
+
+            await thread.send({ content: `${adminPings} <@${interaction.user.id}>`, embeds: [orderEmbed] });
+            rewardMsg += `\n🎫 **Ticket created:** <#${thread.id}>`;
+          } catch (error) {
+            console.error('Failed to create ticket thread:', error);
+            rewardMsg += `\n⚠️ Failed to create ticket (Check permissions).`;
           }
         }
 

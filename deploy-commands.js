@@ -100,7 +100,11 @@ const commands = [
       option.setName('quantity')
         .setDescription('Amount of resource to give (default: 1)')
         .setRequired(false)
-        .setMinValue(1)),
+        .setMinValue(1))
+    .addBooleanOption(option =>
+      option.setName('requires_ticket')
+        .setDescription('Create a staff ticket upon purchase?')
+        .setRequired(false)),
 
   new SlashCommandBuilder()
     .setName('shop-remove')
