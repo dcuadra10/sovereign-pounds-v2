@@ -1120,8 +1120,9 @@ client.on('interactionCreate', async interaction => {
       }
 
     } else if (commandName === 'qotd-setup') {
+      await interaction.deferReply({ ephemeral: true });
       const adminIds = (process.env.ADMIN_IDS || '').split(',');
-      if (!adminIds.includes(interaction.user.id)) return interaction.reply({ content: '🚫 Admin only.', ephemeral: true });
+      if (!adminIds.includes(interaction.user.id)) return interaction.editReply({ content: '🚫 Admin only.' });
 
       const channel = interaction.options.getChannel('channel');
       const role = interaction.options.getRole('role');
@@ -1132,7 +1133,7 @@ client.on('interactionCreate', async interaction => {
             ON CONFLICT (guild_id) DO UPDATE SET channel_id = $2, role_id = $3
         `, [interaction.guildId, channel.id, role.id]);
 
-      await interaction.reply({ content: `✅ QOTD configured: Channel ${channel}, Role ${role}.`, ephemeral: true });
+      await interaction.editReply({ content: `✅ QOTD configured: Channel ${channel}, Role ${role}.` });
 
     } else if (commandName === 'qotd-add') {
       const adminIds = (process.env.ADMIN_IDS || '').split(',');
