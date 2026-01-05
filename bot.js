@@ -312,6 +312,32 @@ function parseDuration(durationString) {
   return milliseconds;
 }
 
+// Helper function to seed the shop with default items
+async function seedShop() {
+  try {
+    const { rows } = await safeQuery('SELECT count(*) as count FROM shop_items');
+    if (parseInt(rows[0].count) === 0) {
+      console.log('🛍️ Seeding shop with default items...');
+      const defaults = [
+        { name: 'Gold Package', price: 10, emoji: '🪙', description: '50,000 Gold', resource: 'gold', quantity: 50000 },
+        { name: 'Wood Package', price: 10, emoji: '🪵', description: '150,000 Wood', resource: 'wood', quantity: 150000 },
+        { name: 'Food Package', price: 10, emoji: '🌽', description: '150,000 Food', resource: 'food', quantity: 150000 },
+        { name: 'Stone Package', price: 10, emoji: '🪨', description: '112,000 Stone', resource: 'stone', quantity: 112000 },
+      ];
+
+      for (const item of defaults) {
+        await safeQuery(
+          'INSERT INTO shop_items (name, price, emoji, description, resource_type, quantity) VALUES ($1, $2, $3, $4, $5, $6)',
+          [item.name, item.price, item.emoji, item.description, item.resource, item.quantity]
+        );
+      }
+      console.log('✅ Shop seeded with default items.');
+    }
+  } catch (error) {
+    console.error('Error seeding shop:', error);
+  }
+}
+
 client.once(Events.ClientReady, async () => {
   console.log(`Logged in as ${client.user.tag}!`);
 
@@ -322,6 +348,9 @@ client.once(Events.ClientReady, async () => {
       cachedInvites.set(invite.code, invite.uses);
     });
   }
+
+  // Seed the shop if empty
+  await seedShop();
 
   // Reset daily counts if needed, but for simplicity, not implemented
 });
@@ -741,8 +770,8 @@ client.on('interactionCreate', async interaction => {
           .addFields(
             { name: '💌 Invites', value: `**${invites}** total`, inline: true },
             { name: '🚀 Server Boosts', value: `**${boosts}** total`, inline: true },
-            { name: '💬 Lifetime Messages', value: `**${totalMessages.toLocaleString('en-US')}** sent\n(${messageProgress}/100 for next reward)` },
-            { name: '🎤 Lifetime Voice Chat', value: `**${totalVoiceMinutes}** minutes\n(${voiceProgress}/60 for next reward)` }
+            { name: '💬 Lifetime Messages', value: `**${totalMessages.toLocaleString('en-US')}** sent\n(${messageProgress}/100 for next reward)`, inline: true },
+            { name: '🎙️ Lifetime Voice Chat', value: `**${totalVoiceMinutes}** minutes\n(${voiceProgress}/60 for next reward)`, inline: true }
           );
         await interaction.editReply({ embeds: [statsEmbed] });
       });

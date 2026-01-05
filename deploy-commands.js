@@ -63,6 +63,54 @@ const commands = [
         .setMinValue(0.01)),
 
   new SlashCommandBuilder()
+    .setName('shop-add')
+    .setDescription('Admin: Add an item to the shop')
+    .addStringOption(option =>
+      option.setName('name')
+        .setDescription('Name of the item')
+        .setRequired(true))
+    .addNumberOption(option =>
+      option.setName('price')
+        .setDescription('Price in Sovereign Pounds')
+        .setRequired(true)
+        .setMinValue(0.01))
+    .addStringOption(option =>
+      option.setName('emoji')
+        .setDescription('Emoji for the item (optional)')
+        .setRequired(false))
+    .addStringOption(option =>
+      option.setName('description')
+        .setDescription('Description of the item (optional)')
+        .setRequired(false))
+    .addRoleOption(option =>
+      option.setName('role')
+        .setDescription('Role to give upon purchase (optional)')
+        .setRequired(false))
+    .addStringOption(option =>
+      option.setName('resource')
+        .setDescription('Resource type (wood, food, stone, gold) (optional)')
+        .setRequired(false)
+        .addChoices(
+          { name: 'Wood', value: 'wood' },
+          { name: 'Food', value: 'food' },
+          { name: 'Stone', value: 'stone' },
+          { name: 'Gold', value: 'gold' }
+        ))
+    .addIntegerOption(option =>
+      option.setName('quantity')
+        .setDescription('Amount of resource to give (default: 1)')
+        .setRequired(false)
+        .setMinValue(1)),
+
+  new SlashCommandBuilder()
+    .setName('shop-remove')
+    .setDescription('Admin: Remove an item from the shop')
+    .addIntegerOption(option =>
+      option.setName('id')
+        .setDescription('ID of the item to remove')
+        .setRequired(true)),
+
+  new SlashCommandBuilder()
     .setName('giveaway')
     .setDescription('Admin: Create a paid giveaway')
     .addStringOption(option =>
