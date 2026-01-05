@@ -1,21 +1,76 @@
 const { Pool } = require('pg');
+const sqlite3 = require('sqlite3').verbose();
 require('dotenv').config();
 
-const connectionString = process.env.DATABASE_URL || process.env.DB_PATH;
+const isSqlite = !!process.env.DB_PATH && !process.env.DATABASE_URL;
+let pool;
 
-if (!connectionString) {
-  throw new Error('FATAL ERROR: DATABASE_URL (or DB_PATH) environment variable is not set. Please set it in your hosting provider.');
+if (isSqlite) {
+  console.log(`Using SQLite database at ${process.env.DB_PATH}`);
+  const db = new sqlite3.Database(process.env.DB_PATH);
+
+  pool = {
+    connect: async () => ({
+      query: (text, params) => executeSqlite(db, text, params),
+      release: () => { }
+    }),
+    query: (text, params) => executeSqlite(db, text, params),
+  };
+} else {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('FATAL ERROR: DATABASE_URL environment variable is not set. Please set it in your hosting provider.');
+  }
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+  });
 }
 
-const pool = new Pool({
-  connectionString: connectionString,
-  ssl: { rejectUnauthorized: false } // Add SSL setting just in case for cloud DBs
-});
+function executeSqlite(db, text, params = []) {
+  // Convert Postgres $n syntax to SQLite ? syntax
+  const sql = text.replace(/\$\d+/g, '?');
+  // console.log(`[SQL] Executing: ${sql.substring(0, 100)}...`); // Uncomment for verbose SQL logging
+
+  // Serialize array/object parameters to JSON strings for SQLite
+  const serializedParams = params.map(p => (typeof p === 'object' && p !== null) ? JSON.stringify(p) : p);
+
+  return new Promise((resolve, reject) => {
+    // Check if it's a SELECT or RETURNING query (needs .all) or UPDATE/INSERT/DELETE (needs .run)
+    // Note: SQLite supports RETURNING in newer versions.
+    if (sql.trim().match(/^(SELECT|WITH)/i) || sql.includes('RETURNING')) {
+      db.all(sql, serializedParams, (err, rows) => {
+        if (err) return reject(err);
+        // Attempt to parse JSON strings back to objects/arrays for compatibility
+        const parsedRows = rows.map(row => {
+          const newRow = { ...row };
+          for (const key in newRow) {
+            if (typeof newRow[key] === 'string' && (newRow[key].startsWith('[') || newRow[key].startsWith('{'))) {
+              try {
+                newRow[key] = JSON.parse(newRow[key]);
+              } catch (e) {
+                // Not JSON, keep as string
+              }
+            }
+          }
+          return newRow;
+        });
+        resolve({ rows: parsedRows, rowCount: rows.length });
+      });
+    } else {
+      db.run(sql, serializedParams, function (err) {
+        if (err) return reject(err);
+        resolve({ rows: [], rowCount: this.changes, oid: this.lastID });
+      });
+    }
+  });
+}
 
 async function initializeDatabase() {
+  // ... (Update CREATE statements) use isSqlite flag
   const client = await pool.connect();
   try {
-    // Users table
+    // ...
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -38,6 +93,22 @@ async function initializeDatabase() {
       )
     `);
 
+    // Migration: Add rewarded_messages to message_counts
+    try {
+      await client.query('ALTER TABLE message_counts ADD COLUMN rewarded_messages BIGINT DEFAULT 0');
+    } catch (err) {
+      if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+        console.log('Migration note (message_counts):', err.message);
+      }
+    }
+
+    // Migration: Fix missing PK/Unique constraint for message_counts (fixing ON CONFLICT error)
+    try {
+      await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_message_counts_user_id ON message_counts(user_id)');
+    } catch (err) {
+      console.log('Migration warning (message_counts index):', err.message);
+    }
+
     // Voice time in minutes
     await client.query(`
       CREATE TABLE IF NOT EXISTS voice_times (
@@ -46,6 +117,22 @@ async function initializeDatabase() {
         rewarded_minutes BIGINT DEFAULT 0
       )
     `);
+
+    // Migration: Add rewarded_minutes to voice_times
+    try {
+      await client.query('ALTER TABLE voice_times ADD COLUMN rewarded_minutes BIGINT DEFAULT 0');
+    } catch (err) {
+      if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+        console.log('Migration note (voice_times):', err.message);
+      }
+    }
+
+    // Migration: Fix missing PK/Unique constraint for voice_times
+    try {
+      await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_times_user_id ON voice_times(user_id)');
+    } catch (err) {
+      console.log('Migration warning (voice_times index):', err.message);
+    }
 
     // Invites
     await client.query(`
@@ -94,8 +181,8 @@ async function initializeDatabase() {
         winner_count INTEGER NOT NULL,
         end_time TIMESTAMP NOT NULL,
         creator_id TEXT NOT NULL,
-        participants TEXT[] DEFAULT '{}',
-        winners TEXT[] DEFAULT '{}',
+        participants ${isSqlite ? 'TEXT' : 'TEXT[]'} DEFAULT ${isSqlite ? "'[]'" : "'{}'"},
+        winners ${isSqlite ? 'TEXT' : 'TEXT[]'} DEFAULT ${isSqlite ? "'[]'" : "'{}'"},
         ended BOOLEAN DEFAULT FALSE,
         required_role_id TEXT
       )
@@ -143,19 +230,19 @@ async function initializeDatabase() {
     // Ticket System Tables
     await client.query(`
       CREATE TABLE IF NOT EXISTS ticket_categories (
-        id SERIAL PRIMARY KEY,
+        id ${isSqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'SERIAL PRIMARY KEY'},
         guild_id TEXT NOT NULL,
         name TEXT NOT NULL,
         emoji TEXT,
         staff_role_id TEXT,
-        form_questions JSONB,
+        form_questions ${isSqlite ? 'TEXT' : 'JSONB'},
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     // Migration to add form_questions if it doesn't exist
     try {
-      await client.query('ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS form_questions JSONB');
+      await client.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS form_questions ${isSqlite ? 'TEXT' : 'JSONB'}`);
     } catch (err) {
       // Ignore if column exists (though ADD COLUMN IF NOT EXISTS handles it in newer PG, node-pg might throw on syntax if old PG)
       console.log('Safe migration: form_questions column check passed.');

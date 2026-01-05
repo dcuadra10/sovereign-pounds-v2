@@ -94,6 +94,20 @@ const commands = [
     .setName('reset-all')
     .setDescription('Admin: Reset all user balances, stats, and resources (IRREVERSIBLE)'),
 
+  new SlashCommandBuilder()
+    .setName('add-emoji')
+    .setDescription('Admin: Upload an image as a server emoji')
+    .addAttachmentOption(option =>
+      option.setName('image')
+        .setDescription('The image file for the emoji')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('name')
+        .setDescription('Name for the emoji')
+        .setRequired(true)
+    ),
+
 
 ].map(command => command.toJSON());
 
