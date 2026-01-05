@@ -5,17 +5,20 @@ const express = require('express');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 
-// Custom Emojis Configuration
+// Custom Emojis Configuration (Reverted to Unicode)
+/*
 const EMOJIS = {
-  coin: '<:se_coin:1457526534662263078>',
-  ticket: '<:se_ticket:1457526668351770655>',
-  check: '<:se_check:1457526920487899292>',
-  cross: '<:se_cross:1457526992785375233>',
-  lock: '<:se_lock:1457527065971789975>',
-  gear: '<:se_gear:1457527142018715732>',
-  gift: '<:se_gift:1457527296301990061>',
-  tada: '<:se_tada:1457527370687975424>'
+  coin: '💰',
+  ticket: '🎫',
+  check: '✅',
+  cross: '❌',
+  lock: '🔒',
+  gear: '⚙️',
+  gift: '🎁',
+  tada: '🎉'
 };
+*/
+// Using Unicode literals in code.
 
 // Helper function to safely execute database queries
 async function safeQuery(query, params = []) {
@@ -433,7 +436,7 @@ client.on('guildMemberAdd', async member => {
         [inviterId, member.id]
       );
 
-      logActivity('💌 Invite Reward', `<@${inviterId}> received **20** ${EMOJIS.coin} for inviting ${member.user.tag}.`, 'Green');
+      logActivity('💌 Invite Reward', `<@${inviterId}> received **20** 💰 for inviting ${member.user.tag}.`, 'Green');
     } else {
       // Member was already invited before, no reward
       console.log(`Member ${member.user.tag} (${member.id}) was already invited by ${inviterId} before. No duplicate reward.`);
@@ -462,7 +465,7 @@ client.on('messageCreate', async message => {
     const totalReward = rewardsToGive * 5;
     await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [totalReward, message.author.id]);
     await db.query('UPDATE message_counts SET rewarded_messages = rewarded_messages + $1 WHERE user_id = $2', [rewardsToGive * 100, message.author.id]);
-    logActivity('💬 Message Reward', `<@${message.author.id}> received **${totalReward}** ${EMOJIS.coin} for sending ${rewardsToGive * 100} messages.`, 'Green');
+    logActivity('💬 Message Reward', `<@${message.author.id}> received **${totalReward}** 💰 for sending ${rewardsToGive * 100} messages.`, 'Green');
   }
 });
 
@@ -494,7 +497,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
           await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [totalReward, member.id]);
           await db.query('UPDATE voice_times SET rewarded_minutes = rewarded_minutes + $1 WHERE user_id = $2', [hoursToReward * 60, member.id]);
 
-          logActivity('🎙️ Voice Reward', `<@${member.id}> received **${totalReward}** ${EMOJIS.coin} for spending ${hoursToReward} hour(s) in voice channels.`, 'Green');
+          logActivity('🎙️ Voice Reward', `<@${member.id}> received **${totalReward}** 💰 for spending ${hoursToReward} hour(s) in voice channels.`, 'Green');
         }
       }
     }
@@ -525,7 +528,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [reward, newMember.id]);
         await db.query('INSERT INTO boosts (user_id, boosts) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET boosts = boosts.boosts + $2', [newMember.id, newBoosts]);
         await db.query('INSERT INTO server_stats (id, rewarded_boosts) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET rewarded_boosts = $2', [guild.id, currentBoosts]);
-        logActivity('🚀 Server Boost Reward', `<@${newMember.id}> received **${reward}** ${EMOJIS.coin} for **${newBoosts}** new boost(s).`, 'Gold');
+        logActivity('🚀 Server Boost Reward', `<@${newMember.id}> received **${reward}** 💰 for **${newBoosts}** new boost(s).`, 'Gold');
       }
       return;
     }
@@ -543,7 +546,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
       // Update the total rewarded boosts for the server
       await db.query('INSERT INTO server_stats (id, rewarded_boosts) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET rewarded_boosts = $2', [guild.id, currentBoosts]);
 
-      logActivity('🚀 Server Boost Reward', `<@${newMember.id}> received **${reward}** ${EMOJIS.coin} for **${newBoosts}** new boost(s).`, 'Gold');
+      logActivity('🚀 Server Boost Reward', `<@${newMember.id}> received **${reward}** 💰 for **${newBoosts}** new boost(s).`, 'Gold');
     }
   }
 });
@@ -600,7 +603,7 @@ client.on('interactionCreate', async interaction => {
       const embed = new EmbedBuilder()
         .setColor('Blue')
         .setDescription(`# 📊 ${interaction.user.username}'s Balance\n\n` +
-          `${EMOJIS.coin} **${(row?.balance || 0).toLocaleString('en-US')}** Sovereign Pounds\n\n` +
+          `💰 **${(row?.balance || 0).toLocaleString('en-US')}** Sovereign Pounds\n\n` +
           `**Inventory**\n` +
           `🪙 Gold: ${(row?.gold || 0).toLocaleString('en-US')}\n` +
           `🪵 Wood: ${(row?.wood || 0).toLocaleString('en-US')}\n` +
@@ -621,8 +624,8 @@ client.on('interactionCreate', async interaction => {
 
         const embed = new EmbedBuilder()
           .setColor('Blue')
-          .setTitle(`${EMOJIS.coin} Sovereign Empire Shop`)
-          .setDescription(`Select an item below to purchase.\n\n${EMOJIS.coin} **Your Balance:** ${balance.toLocaleString('en-US')} ${EMOJIS.coin}`);
+          .setTitle(`💰 Sovereign Empire Shop`)
+          .setDescription(`Select an item below to purchase.\n\n💰 **Your Balance:** ${balance.toLocaleString('en-US')} 💰`);
 
         if (items.length === 0) {
           embed.setDescription(embed.data.description + '\n\n🚫 The shop is currently empty.');
@@ -648,7 +651,7 @@ client.on('interactionCreate', async interaction => {
             new StringSelectMenuOptionBuilder()
               .setLabel(`${item.name}`)
               .setValue(item.id.toString())
-              .setDescription(`${item.price.toLocaleString('en-US')} ${EMOJIS.coin} - ${item.description || ''}`.substring(0, 100))
+              .setDescription(`${item.price.toLocaleString('en-US')} 💰 - ${item.description || ''}`.substring(0, 100))
               .setEmoji(emojiIdOrChar)
           );
         });
@@ -658,20 +661,20 @@ client.on('interactionCreate', async interaction => {
 
       } catch (error) {
         console.error('Error in shop command:', error);
-        await interaction.reply({ content: `${EMOJIS.cross} An error occurred while opening the shop.`, ephemeral: true });
+        await interaction.reply({ content: `❌ An error occurred while opening the shop.`, ephemeral: true });
       }
 
     } else if (commandName === 'help') {
       const embed = new EmbedBuilder()
         .setColor('Blue')
-        .setTitle(`${EMOJIS.coin} Sovereign Empire Bot Help`)
+        .setTitle(`💰 Sovereign Empire Bot Help`)
         .setDescription(`# Command List
         
 **Earn Currency**
-> **Invites**: 20 ${EMOJIS.coin}
-> **Messages**: 5 ${EMOJIS.coin} / 100 msgs
-> **Voice**: 5 ${EMOJIS.coin} / hour
-> **Boosts**: 500 ${EMOJIS.coin}
+> **Invites**: 20 💰
+> **Messages**: 5 💰 / 100 msgs
+> **Voice**: 5 💰 / hour
+> **Boosts**: 500 💰
 
 **User Commands**
 \`/balance\` \`/shop\` \`/daily\`
@@ -726,10 +729,10 @@ client.on('interactionCreate', async interaction => {
 
         const replyEmbed = new EmbedBuilder()
           .setColor('Gold')
-          .setDescription(`## ${EMOJIS.tada} Daily Reward\nReceived **${reward}** ${EMOJIS.coin}\nStreak: ${streak} days`);
+          .setDescription(`## 🎉 Daily Reward\nReceived **${reward}** 💰\nStreak: ${streak} days`);
 
         await interaction.editReply({ embeds: [replyEmbed] });
-        logActivity(`${EMOJIS.gift} Daily Reward`, `<@${userId}> claimed their daily reward of **${reward}** ${EMOJIS.coin} (Streak: ${streak}).`, 'Aqua');
+        logActivity(`🎁 Daily Reward`, `<@${userId}> claimed their daily reward of **${reward}** 💰 (Streak: ${streak}).`, 'Aqua');
       } catch (err) {
         console.error(err);
         return await interaction.editReply({ content: '❌ An error occurred while processing your daily reward.' });
@@ -791,10 +794,10 @@ client.on('interactionCreate', async interaction => {
           try {
             const user = await client.users.fetch(top10Users[i].id);
             const medal = ['🥇', '🥈', '🥉'][i] || `**${i + 1}.**`;
-            description += `${medal} <@${user.id}> - **${top10Users[i].balance.toLocaleString('en-US')}** ${EMOJIS.coin}\n`;
+            description += `${medal} <@${user.id}> - **${top10Users[i].balance.toLocaleString('en-US')}** 💰\n`;
           } catch {
             // User might not be in the server anymore
-            description += `**${i + 1}.** *Unknown User* - **${top10Users[i].balance.toLocaleString('en-US')}** ${EMOJIS.coin}\n`;
+            description += `**${i + 1}.** *Unknown User* - **${top10Users[i].balance.toLocaleString('en-US')}** 💰\n`;
           }
         }
 
@@ -807,7 +810,7 @@ client.on('interactionCreate', async interaction => {
         if (userRankIndex !== -1 && userRankIndex >= 10) {
           const userRank = userRankIndex + 1;
           const userBalance = allUsers[userRankIndex].balance;
-          description += `\n...\n**${userRank}.** <@${interaction.user.id}> - **${userBalance.toLocaleString('en-US')}** ${EMOJIS.coin}`;
+          description += `\n...\n**${userRank}.** <@${interaction.user.id}> - **${userBalance.toLocaleString('en-US')}** 💰`;
         }
 
         embed.setDescription(description);
@@ -836,13 +839,13 @@ client.on('interactionCreate', async interaction => {
         const poolBalance = result.rows[0]?.pool_balance || 0;
         const embed = new EmbedBuilder()
           .setTitle('🏦 Server Pool Balance')
-          .setDescription(`The server pool currently holds **${poolBalance.toLocaleString('en-US')}** ${EMOJIS.coin}.`)
+          .setDescription(`The server pool currently holds **${poolBalance.toLocaleString('en-US')}** 💰.`)
           .setColor('Aqua');
         await interaction.editReply({ embeds: [embed] });
       } catch (error) {
         console.error('Error checking pool balance:', error);
         try {
-          await interaction.editReply({ content: `${EMOJIS.cross} Error checking pool balance: ${error.message}. Please check the console for more details.` });
+          await interaction.editReply({ content: `❌ Error checking pool balance: ${error.message}. Please check the console for more details.` });
         } catch (replyError) {
           console.error('Error replying to interaction:', replyError);
         }
@@ -873,18 +876,18 @@ client.on('interactionCreate', async interaction => {
         const poolBalance = result.rows[0]?.pool_balance || 0;
 
         if (amount > poolBalance) {
-          return await interaction.editReply({ content: `${EMOJIS.cross} Not enough funds in the server pool! The pool only has **${poolBalance.toLocaleString('en-US')}** ${EMOJIS.coin}.` });
+          return await interaction.editReply({ content: `❌ Not enough funds in the server pool! The pool only has **${poolBalance.toLocaleString('en-US')}** 💰.` });
         }
 
         await db.query('UPDATE server_stats SET pool_balance = pool_balance - $1 WHERE id = $2', [amount, interaction.guildId]);
         await db.query('INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [targetUser.id]);
         await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [amount, targetUser.id]);
 
-        await interaction.editReply({ content: `${EMOJIS.check} Successfully gave **${amount.toLocaleString('en-US')}** ${EMOJIS.coin} to ${targetUser}.` });
-        logActivity('💸 Admin Give', `<@${interaction.user.id}> gave **${amount.toLocaleString('en-US')}** ${EMOJIS.coin} to ${targetUser}.`, 'Yellow');
+        await interaction.editReply({ content: `✅ Successfully gave **${amount.toLocaleString('en-US')}** 💰 to ${targetUser}.` });
+        logActivity('💸 Admin Give', `<@${interaction.user.id}> gave **${amount.toLocaleString('en-US')}** 💰 to ${targetUser}.`, 'Yellow');
       } catch (error) {
         console.error('Error giving currency:', error);
-        await interaction.editReply({ content: `${EMOJIS.cross} An error occurred while giving currency.` });
+        await interaction.editReply({ content: `❌ An error occurred while giving currency.` });
       }
 
     } else if (commandName === 'take') {
@@ -906,17 +909,17 @@ client.on('interactionCreate', async interaction => {
         const userBalance = userBalanceResult.rows[0]?.balance || 0;
 
         if (userBalance < amount) {
-          return await interaction.editReply({ content: `${EMOJIS.cross} The user only has **${userBalance.toLocaleString('en-US')}** ${EMOJIS.coin}.` });
+          return await interaction.editReply({ content: `❌ The user only has **${userBalance.toLocaleString('en-US')}** 💰.` });
         }
 
         await db.query('UPDATE server_stats SET pool_balance = pool_balance + $1 WHERE id = $2', [amount, interaction.guildId]);
         await db.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [amount, targetUser.id]);
 
-        await interaction.editReply({ content: `${EMOJIS.check} Successfully took **${amount.toLocaleString('en-US')}** ${EMOJIS.coin} from ${targetUser}.` });
-        logActivity('💸 Admin Take', `<@${interaction.user.id}> took **${amount.toLocaleString('en-US')}** ${EMOJIS.coin} from ${targetUser}.`, 'Orange');
+        await interaction.editReply({ content: `✅ Successfully took **${amount.toLocaleString('en-US')}** 💰 from ${targetUser}.` });
+        logActivity('💸 Admin Take', `<@${interaction.user.id}> took **${amount.toLocaleString('en-US')}** 💰 from ${targetUser}.`, 'Orange');
       } catch (error) {
         console.error('Error taking currency:', error);
-        await interaction.editReply({ content: `${EMOJIS.cross} An error occurred while taking currency.` });
+        await interaction.editReply({ content: `❌ An error occurred while taking currency.` });
       }
 
     } else if (commandName === 'shop-add') {
@@ -938,10 +941,10 @@ client.on('interactionCreate', async interaction => {
           'INSERT INTO shop_items (name, price, emoji, description, role_id, resource_type, quantity) VALUES ($1, $2, $3, $4, $5, $6, $7)',
           [name, price, emoji, description, role?.id, resource, quantity]
         );
-        await interaction.reply({ content: `${EMOJIS.check} Added item **${name}** (x${quantity}) to the shop for **${price}** ${EMOJIS.coin}.`, ephemeral: true });
+        await interaction.reply({ content: `✅ Added item **${name}** (x${quantity}) to the shop for **${price}** 💰.`, ephemeral: true });
       } catch (error) {
         console.error('Error adding shop item:', error);
-        await interaction.reply({ content: `${EMOJIS.cross} Failed to add item.`, ephemeral: true });
+        await interaction.reply({ content: `❌ Failed to add item.`, ephemeral: true });
       }
 
     } else if (commandName === 'shop-remove') {
@@ -953,10 +956,10 @@ client.on('interactionCreate', async interaction => {
       const id = interaction.options.getInteger('id');
       try {
         await safeQuery('DELETE FROM shop_items WHERE id = $1', [id]);
-        await interaction.reply({ content: `${EMOJIS.check} Removed shop item ID **${id}**.`, ephemeral: true });
+        await interaction.reply({ content: `✅ Removed shop item ID **${id}**.`, ephemeral: true });
       } catch (error) {
         console.error('Error removing shop item:', error);
-        await interaction.reply({ content: `${EMOJIS.cross} Failed to remove item.`, ephemeral: true });
+        await interaction.reply({ content: `❌ Failed to remove item.`, ephemeral: true });
       }
 
     } else if (commandName === 'ticket-setup') {
@@ -1312,14 +1315,14 @@ client.on('interactionCreate', async interaction => {
       const itemId = interaction.values[0];
       try {
         const { rows } = await safeQuery('SELECT * FROM shop_items WHERE id = $1', [itemId]);
-        if (rows.length === 0) return interaction.reply({ content: `${EMOJIS.cross} Item no longer exists.`, ephemeral: true });
+        if (rows.length === 0) return interaction.reply({ content: `❌ Item no longer exists.`, ephemeral: true });
         const item = rows[0];
 
         const { rows: userRows } = await safeQuery('SELECT balance FROM users WHERE id = $1', [interaction.user.id]);
         const balance = userRows[0]?.balance || 0;
 
         if (balance < item.price) {
-          return interaction.reply({ content: `${EMOJIS.cross} Insufficient funds. You need **${item.price.toLocaleString('en-US')}** ${EMOJIS.coin} to buy **${item.name}**.`, ephemeral: true });
+          return interaction.reply({ content: `❌ Insufficient funds. You need **${item.price.toLocaleString('en-US')}** 💰 to buy **${item.name}**.`, ephemeral: true });
         }
 
         await safeQuery('UPDATE users SET balance = balance - $1 WHERE id = $2', [item.price, interaction.user.id]);
@@ -1343,12 +1346,12 @@ client.on('interactionCreate', async interaction => {
           }
         }
 
-        await interaction.reply({ content: `${EMOJIS.check} Successfully purchased **${item.name}** for **${item.price.toLocaleString('en-US')}** ${EMOJIS.coin}.\n${rewardMsg}`, ephemeral: true });
-        logActivity('🛒 Shop Purchase', `<@${interaction.user.id}> bought **${item.name}** for ${item.price} ${EMOJIS.coin}.\n${rewardMsg}`, 'Blue');
+        await interaction.reply({ content: `✅ Successfully purchased **${item.name}** for **${item.price.toLocaleString('en-US')}** 💰.\n${rewardMsg}`, ephemeral: true });
+        logActivity('🛒 Shop Purchase', `<@${interaction.user.id}> bought **${item.name}** for ${item.price} 💰.\n${rewardMsg}`, 'Blue');
 
       } catch (err) {
         console.error(err);
-        interaction.reply({ content: `${EMOJIS.cross} Transaction failed.`, ephemeral: true });
+        interaction.reply({ content: `❌ Transaction failed.`, ephemeral: true });
       }
     } else if (interaction.customId === 'ticket_category_select') {
       const catId = interaction.values[0];
@@ -1526,7 +1529,7 @@ client.on('interactionCreate', async interaction => {
 
       const confirmationEmbed = new EmbedBuilder()
         .setTitle('🛒 Purchase Confirmation')
-        .setDescription(`You are about to spend **${cost.toLocaleString('en-US')}** ${EMOJIS.coin} to receive **${desiredResourceAmount.toLocaleString('en-US')} ${resource}**.\n\nPlease confirm your purchase.`)
+        .setDescription(`You are about to spend **${cost.toLocaleString('en-US')}** 💰 to receive **${desiredResourceAmount.toLocaleString('en-US')} ${resource}**.\n\nPlease confirm your purchase.`)
         .setColor('Orange');
 
       const row = new ActionRowBuilder()
@@ -1598,11 +1601,11 @@ client.on('interactionCreate', async interaction => {
 
       // Create giveaway embed
       const giveawayEmbed = new EmbedBuilder()
-        .setTitle(`${EMOJIS.gift} **GIVEAWAY** ${EMOJIS.gift}`)
-        .setDescription(`${EMOJIS.tada} **Prize:** ${totalPrize.toLocaleString('en-US')} ${EMOJIS.coin}\n` +
-          `${EMOJIS.tada} **Winners:** ${winnerCount}\n` +
+        .setTitle(`🎁 **GIVEAWAY** 🎁`)
+        .setDescription(`🎉 **Prize:** ${totalPrize.toLocaleString('en-US')} 💰\n` +
+          `🎉 **Winners:** ${winnerCount}\n` +
           `⏱️ **Ends:** <t:${Math.floor(endTime / 1000)}:R>\n` +
-          `💸 **Entry Cost:** ${entryCost.toLocaleString('en-US')} ${EMOJIS.coin}\n` +
+          `💸 **Entry Cost:** ${entryCost.toLocaleString('en-US')} 💰\n` +
           `\nClick the button below to join!`)
         .setColor('Purple')
         .setFooter({ text: `Hosted by ${interaction.user.tag}` });
@@ -1611,7 +1614,7 @@ client.on('interactionCreate', async interaction => {
         .setCustomId(`join_giveaway_${giveawayId}`)
         .setLabel(`Join (${entryCost.toLocaleString('en-US')} SE)`)
         .setStyle(ButtonStyle.Success)
-        .setEmoji(EMOJIS.gift.match(/\d+/)[0]);
+        .setEmoji('🎁');
 
       const row = new ActionRowBuilder().addComponents(joinButton);
 
@@ -1705,7 +1708,7 @@ client.on('interactionCreate', async interaction => {
               .setCustomId('close_ticket_btn')
               .setLabel('Close Ticket')
               .setStyle(ButtonStyle.Danger)
-              .setEmoji(EMOJIS.lock.match(/\d+/)[0])
+              .setEmoji('🔒')
           );
 
         await ticketThread.send({ embeds: [welcomeEmbed], components: [closeButton] });
