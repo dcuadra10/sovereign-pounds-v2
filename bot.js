@@ -5,6 +5,18 @@ const express = require('express');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 
+// Custom Emojis Configuration
+const EMOJIS = {
+  coin: '<:se_coin:1457526534662263078>',
+  ticket: '<:se_ticket:1457526668351770655>',
+  check: '<:se_check:1457526920487899292>',
+  cross: '<:se_cross:1457526992785375233>',
+  lock: '<:se_lock:1457527065971789975>',
+  gear: '<:se_gear:1457527142018715732>',
+  gift: '<:se_gift:1457527296301990061>',
+  tada: '<:se_tada:1457527370687975424>'
+};
+
 // Helper function to safely execute database queries
 async function safeQuery(query, params = []) {
   try {
@@ -1347,7 +1359,7 @@ client.on('interactionCreate', async interaction => {
 
       const confirmationEmbed = new EmbedBuilder()
         .setTitle('🛒 Purchase Confirmation')
-        .setDescription(`You are about to spend **${cost.toLocaleString('en-US')}** 💰 to receive **${desiredResourceAmount.toLocaleString('en-US')} ${resource}**.\n\nPlease confirm your purchase.`)
+        .setDescription(`You are about to spend **${cost.toLocaleString('en-US')}** ${EMOJIS.coin} to receive **${desiredResourceAmount.toLocaleString('en-US')} ${resource}**.\n\nPlease confirm your purchase.`)
         .setColor('Orange');
 
       const row = new ActionRowBuilder()
@@ -1415,22 +1427,24 @@ client.on('interactionCreate', async interaction => {
         });
       }
 
-      // Deduct total prize from pool
       await db.query('UPDATE server_stats SET pool_balance = pool_balance - $1 WHERE id = $2', [totalPrize, interaction.guildId]);
 
       // Create giveaway embed
       const giveawayEmbed = new EmbedBuilder()
-        .setTitle('🎉 Giveaway! 🎉')
-        .setDescription(`**Total Prize:** ${totalPrize.toLocaleString('en-US')} 💰\n**Prize per Winner:** ${prizePerWinner.toLocaleString('en-US')} 💰\n**Entry Cost:** ${entryCost.toLocaleString('en-US')} 💰\n**Winners:** ${winnerCount}\n**Ends:** <t:${Math.floor(endTime / 1000)}:R>`)
-        .setColor('Gold')
-        .setFooter({ text: `Giveaway ID: ${giveawayId}` })
-        .setTimestamp();
+        .setTitle(`${EMOJIS.gift} **GIVEAWAY** ${EMOJIS.gift}`)
+        .setDescription(`${EMOJIS.tada} **Prize:** ${totalPrize.toLocaleString('en-US')} ${EMOJIS.coin}\n` +
+          `${EMOJIS.tada} **Winners:** ${winnerCount}\n` +
+          `⏱️ **Ends:** <t:${Math.floor(endTime / 1000)}:R>\n` +
+          `💸 **Entry Cost:** ${entryCost.toLocaleString('en-US')} ${EMOJIS.coin}\n` +
+          `\nClick the button below to join!`)
+        .setColor('Purple')
+        .setFooter({ text: `Hosted by ${interaction.user.tag}` });
 
       const joinButton = new ButtonBuilder()
         .setCustomId(`join_giveaway_${giveawayId}`)
-        .setLabel(`Join Giveaway (${entryCost.toLocaleString('en-US')} 💰)`)
-        .setStyle(ButtonStyle.Primary)
-        .setEmoji('🎁');
+        .setLabel(`Join (${entryCost.toLocaleString('en-US')} SE)`)
+        .setStyle(ButtonStyle.Success)
+        .setEmoji(EMOJIS.gift.match(/\d+/)[0]);
 
       const row = new ActionRowBuilder().addComponents(joinButton);
 
@@ -1524,7 +1538,7 @@ client.on('interactionCreate', async interaction => {
               .setCustomId('close_ticket_btn')
               .setLabel('Close Ticket')
               .setStyle(ButtonStyle.Danger)
-              .setEmoji('🔒')
+              .setEmoji(EMOJIS.lock.match(/\d+/)[0])
           );
 
         await ticketThread.send({ embeds: [welcomeEmbed], components: [closeButton] });
