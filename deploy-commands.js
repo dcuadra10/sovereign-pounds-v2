@@ -210,19 +210,28 @@ const ticketCommands = [
     .setDescription('Admin: Manage ticket categories')
     .addSubcommand(subcommand =>
       subcommand
-        .setName('add')
-        .setDescription('Add a new ticket category')
+        .setName('edit')
+        .setDescription('Edit an existing ticket category')
         .addStringOption(option =>
           option.setName('name')
-            .setDescription('Name of the category')
-            .setRequired(true))
+            .setDescription('Current name of the category to edit')
+            .setRequired(true)
+            .setAutocomplete(true))
+        .addStringOption(option =>
+          option.setName('new_name')
+            .setDescription('New name for the category')
+            .setRequired(false))
         .addRoleOption(option =>
           option.setName('role')
-            .setDescription('Staff role to be pinged/added for this category')
-            .setRequired(true))
+            .setDescription('New staff role')
+            .setRequired(false))
         .addStringOption(option =>
           option.setName('emoji')
-            .setDescription('Emoji for the dropdown option (optional)')
+            .setDescription('New emoji')
+            .setRequired(false))
+        .addBooleanOption(option =>
+          option.setName('edit_questions')
+            .setDescription('Launch a wizard to edit the questions?')
             .setRequired(false)))
     .addSubcommand(subcommand =>
       subcommand
@@ -233,6 +242,34 @@ const ticketCommands = [
             .setDescription('Name of the category to remove')
             .setRequired(true)
             .setAutocomplete(true))),
+
+  new SlashCommandBuilder()
+    .setName('ticket-panel-edit')
+    .setDescription('Admin: Edit the ticket panel message')
+    .addChannelOption(option =>
+      option.setName('channel')
+        .setDescription('Channel where the panel is located')
+        .setRequired(true))
+    .addStringOption(option =>
+      option.setName('message_id')
+        .setDescription('ID of the panel message')
+        .setRequired(true))
+    .addStringOption(option =>
+      option.setName('title')
+        .setDescription('New title for the embed')
+        .setRequired(false))
+    .addStringOption(option =>
+      option.setName('description')
+        .setDescription('New description for the embed')
+        .setRequired(false))
+    .addStringOption(option =>
+      option.setName('image_url')
+        .setDescription('New image URL (optional)')
+        .setRequired(false))
+    .addStringOption(option =>
+      option.setName('thumbnail_url')
+        .setDescription('New thumbnail URL (optional)')
+        .setRequired(false)),
 
   new SlashCommandBuilder()
     .setName('ticket-wizard')

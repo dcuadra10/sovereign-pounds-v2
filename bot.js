@@ -684,6 +684,26 @@ client.on('guildCreate', async (guild) => {
 client.on('interactionCreate', async interaction => {
   console.log(`Received interaction: type=${interaction.type}, command=${interaction.commandName}, customId=${interaction.customId}, user=${interaction.user.tag}`);
 
+  if (interaction.isAutocomplete()) {
+    const commandName = interaction.commandName;
+    if (commandName === 'ticket-category') {
+      const focusedValue = interaction.options.getFocused();
+      try {
+        const { rows } = await safeQuery(
+          'SELECT name FROM ticket_categories WHERE guild_id = $1 AND name ILIKE $2 LIMIT 25',
+          [interaction.guildId, `%${focusedValue}%`]
+        );
+        const choices = rows.map(row => row.name);
+        await interaction.respond(
+          choices.map(choice => ({ name: choice, value: choice }))
+        );
+      } catch (error) {
+        console.error('Error handling autocomplete:', error);
+      }
+    }
+    return;
+  }
+
   if (interaction.isChatInputCommand()) { // Handle Slash Commands
     const { commandName } = interaction;
     await db.query('INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [interaction.user.id]);
@@ -1241,135 +1261,242 @@ client.on('interactionCreate', async interaction => {
 
       const subcommand = interaction.options.getSubcommand();
 
-      if (subcommand === 'add') {
-        const name = interaction.options.getString('name');
-        const role = interaction.options.getRole('role');
-        const emoji = interaction.options.getString('emoji') || '🎫';
+    } else if (subcommand === 'edit') {
+      const currentName = interaction.options.getString('name');
+      const newName = interaction.options.getString('new_name');
+      const newRole = interaction.options.getRole('role');
+      const newEmoji = interaction.options.getString('emoji');
+      const editQuestions = interaction.options.getBoolean('edit_questions');
 
-        await db.query(
-          'INSERT INTO ticket_categories (guild_id, name, emoji, staff_role_id) VALUES ($1, $2, $3, $4)',
-          [interaction.guildId, name, emoji, role.id]
-        );
-
-        await interaction.reply({ content: `✅ Category **${name}** added with role ${role} and emoji ${emoji}.`, ephemeral: true });
-
-        // TODO: Auto-update panel if exists
-      } else if (subcommand === 'remove') {
-        const name = interaction.options.getString('name');
-        await db.query('DELETE FROM ticket_categories WHERE guild_id = $1 AND name = $2', [interaction.guildId, name]);
-        await interaction.reply({ content: `✅ Category **${name}** removed.`, ephemeral: true });
-      }
-
-    } else if (commandName === 'ticket-wizard') {
-      const adminIds = (process.env.ADMIN_IDS || '').split(',');
-      console.log(`[Wizard Debug] User: ${interaction.user.id}, Admins: ${JSON.stringify(adminIds)}`);
-
-      if (!adminIds.includes(interaction.user.id)) {
-        console.log('[Wizard Debug] Permission denied.');
-        return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
-      }
-
-      await interaction.reply({ content: '🧙‍♂️ Starting Ticket Wizard...', ephemeral: true });
-      console.log('[Wizard Debug] Reply sent. Creating thread...');
-
-      try {
-        // Create private thread
-        const thread = await interaction.channel.threads.create({
-          name: 'ticket-creation-zone',
-          type: ChannelType.PrivateThread,
-          autoArchiveDuration: 60,
-          reason: 'Ticket Setup Wizard'
-        });
-        console.log(`[Wizard Debug] Thread created: ${thread.id}`);
-
-        await thread.members.add(interaction.user.id);
-
-        const embed = new EmbedBuilder()
-          .setTitle('🧙‍♂️ Ticket Category Wizard')
-          .setDescription('Click the button below to create a new Ticket Category.\nThis will prompt you for the Name, Emoji, and Role ID.')
-          .setColor('Purple');
-
-        const btn = new ButtonBuilder()
-          .setCustomId('wizard_create_cat_btn')
-          .setLabel('Create Category')
-          .setStyle(ButtonStyle.Primary)
-          .setEmoji('✨');
-
-        await thread.send({ embeds: [embed], components: [new ActionRowBuilder().addComponents(btn)] });
-        await interaction.editReply({ content: `✅ Wizard started: <#${thread.id}>` });
-      } catch (err) {
-        console.error('Error starting wizard:', err);
-        await interaction.editReply({ content: '❌ Failed to create wizard thread. Check permissions.' });
-      }
-
-    } else if (commandName === 'close') {
-      // Check if channel is a ticket (which is now a thread)
-      const { rows } = await db.query('SELECT * FROM tickets WHERE channel_id = $1 AND closed = FALSE', [interaction.channelId]);
+      const { rows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1 AND name = $2', [interaction.guildId, currentName]);
       if (rows.length === 0) {
-        // Also check if it's a thread just in case
-        if (!interaction.channel.isThread()) {
-          return await interaction.reply({ content: '❌ This command can only be used in active ticket threads.', ephemeral: true });
-        }
-        // If it is a thread but not in DB, maybe just error?
-        return await interaction.reply({ content: '❌ Ticket not found in database.', ephemeral: true });
+        return await interaction.reply({ content: `❌ Category **${currentName}** not found.`, ephemeral: true });
       }
+      const categoryId = rows[0].id;
 
-      await interaction.reply({ content: '🔒 Closing ticket...' });
-
-      const ticket = rows[0];
-      const thread = interaction.channel;
-
-      // Update DB
-      await db.query('UPDATE tickets SET closed = TRUE WHERE channel_id = $1', [thread.id]);
-
-      // Delete thread after 5 seconds
-      setTimeout(async () => {
+      // If editQuestions is requested, launch wizard logic for questions
+      if (editQuestions) {
+        await interaction.reply({ content: `🧙‍♂️ Launching question editor for **${currentName}**...`, ephemeral: true });
         try {
-          await thread.delete();
+          const thread = await interaction.channel.threads.create({
+            name: `edit-questions-${currentName}`,
+            type: ChannelType.PrivateThread,
+            autoArchiveDuration: 60,
+            reason: 'Edit Ticket Questions'
+          });
+          await thread.members.add(interaction.user.id);
+
+          const questions = rows[0].form_questions ? JSON.parse(rows[0].form_questions) : [];
+
+          const embed = new EmbedBuilder()
+            .setTitle(`Edit Questions: ${currentName}`)
+            .setDescription(`Current Questions:\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n') || 'None'}`)
+            .setColor('Purple');
+
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`wizard_add_single_q_${categoryId}`).setLabel('Add Question').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId(`wizard_clear_q_${categoryId}`).setLabel('Clear All').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId(`wizard_finish_${categoryId}`).setLabel('Finish').setStyle(ButtonStyle.Success)
+          );
+
+          await thread.send({ embeds: [embed], components: [row] });
+          await interaction.editReply({ content: `✅ Question editor started: <#${thread.id}>` });
         } catch (err) {
-          console.error('Failed to delete ticket thread:', err);
+          console.error('Error starting question editor:', err);
+          await interaction.editReply({ content: '❌ Failed to create editor thread.' });
         }
-      }, 5000);
+        // Don't process other updates if entering wizard, or process them? 
+        // Let's process others too if provided.
+      }
 
-    } else if (commandName === 'add-user') {
+      const updates = [];
+      const params = [];
+      let paramIndex = 1;
+
+      if (newName) {
+        updates.push(`name = $${paramIndex}`);
+        params.push(newName);
+        paramIndex++;
+      }
+      if (newRole) {
+        updates.push(`staff_role_id = $${paramIndex}`);
+        params.push(newRole.id);
+        paramIndex++;
+      }
+      if (newEmoji) {
+        updates.push(`emoji = $${paramIndex}`);
+        params.push(newEmoji);
+        paramIndex++;
+      }
+
+      if (updates.length > 0) {
+        params.push(interaction.guildId);
+        params.push(currentName);
+        const query = `UPDATE ticket_categories SET ${updates.join(', ')} WHERE guild_id = $${paramIndex} AND name = $${paramIndex + 1}`;
+        await safeQuery(query, params);
+        if (!editQuestions) {
+          await interaction.reply({ content: `✅ Category **${currentName}** updated.`, ephemeral: true });
+        }
+      } else {
+        if (!editQuestions) {
+          await interaction.reply({ content: '⚠️ No changes requested.', ephemeral: true });
+        }
+      }
+
+    } else if (subcommand === 'remove') {
+      const name = interaction.options.getString('name');
+      await db.query('DELETE FROM ticket_categories WHERE guild_id = $1 AND name = $2', [interaction.guildId, name]);
+      await interaction.reply({ content: `✅ Category **${name}** removed.`, ephemeral: true });
+    }
+
+  } else if (commandName === 'ticket-wizard') {
+    const adminIds = (process.env.ADMIN_IDS || '').split(',');
+    console.log(`[Wizard Debug] User: ${interaction.user.id}, Admins: ${JSON.stringify(adminIds)}`);
+
+    if (!adminIds.includes(interaction.user.id)) {
+      console.log('[Wizard Debug] Permission denied.');
+      return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
+    }
+
+    await interaction.reply({ content: '🧙‍♂️ Starting Ticket Wizard...', ephemeral: true });
+    console.log('[Wizard Debug] Reply sent. Creating thread...');
+
+    try {
+      // Create private thread
+      const thread = await interaction.channel.threads.create({
+        name: 'ticket-creation-zone',
+        type: ChannelType.PrivateThread,
+        autoArchiveDuration: 60,
+        reason: 'Ticket Setup Wizard'
+      });
+      console.log(`[Wizard Debug] Thread created: ${thread.id}`);
+
+      await thread.members.add(interaction.user.id);
+
+      const embed = new EmbedBuilder()
+        .setTitle('🧙‍♂️ Ticket Category Wizard')
+        .setDescription('Click the button below to create a new Ticket Category.\nThis will prompt you for the Name, Emoji, and Role ID.')
+        .setColor('Purple');
+
+      const btn = new ButtonBuilder()
+        .setCustomId('wizard_create_cat_btn')
+        .setLabel('Create Category')
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji('✨');
+
+      await thread.send({ embeds: [embed], components: [new ActionRowBuilder().addComponents(btn)] });
+      await interaction.editReply({ content: `✅ Wizard started: <#${thread.id}>` });
+    } catch (err) {
+      console.error('Error starting wizard:', err);
+      await interaction.editReply({ content: '❌ Failed to create wizard thread. Check permissions.' });
+    }
+
+  } else if (commandName === 'close') {
+    // Check if channel is a ticket (which is now a thread)
+    const { rows } = await db.query('SELECT * FROM tickets WHERE channel_id = $1 AND closed = FALSE', [interaction.channelId]);
+    if (rows.length === 0) {
+      // Also check if it's a thread just in case
       if (!interaction.channel.isThread()) {
         return await interaction.reply({ content: '❌ This command can only be used in active ticket threads.', ephemeral: true });
       }
+      // If it is a thread but not in DB, maybe just error?
+      return await interaction.reply({ content: '❌ Ticket not found in database.', ephemeral: true });
+    }
 
-      const user = interaction.options.getUser('user');
+    await interaction.reply({ content: '🔒 Closing ticket...' });
+
+    const ticket = rows[0];
+    const thread = interaction.channel;
+
+    // Update DB
+    await db.query('UPDATE tickets SET closed = TRUE WHERE channel_id = $1', [thread.id]);
+
+    // Delete thread after 5 seconds
+    setTimeout(async () => {
       try {
-        await interaction.channel.members.add(user.id);
-        await interaction.reply({ content: `✅ Added ${user} to the ticket.` });
+        await thread.delete();
       } catch (err) {
-        console.error(err);
-        await interaction.reply({ content: '❌ Failed to add user to the thread.' });
+        console.error('Failed to delete ticket thread:', err);
       }
+    }, 5000);
 
-    } else if (commandName === 'remove-user') {
-      if (!interaction.channel.isThread()) {
-        return await interaction.reply({ content: '❌ This command can only be used in active ticket threads.', ephemeral: true });
-      }
+  } else if (commandName === 'add-user') {
+    if (!interaction.channel.isThread()) {
+      return await interaction.reply({ content: '❌ This command can only be used in active ticket threads.', ephemeral: true });
+    }
 
-      const user = interaction.options.getUser('user');
-      try {
-        await interaction.channel.members.remove(user.id);
-        await interaction.reply({ content: `✅ Removed ${user} from the ticket.` });
-      } catch (err) {
-        console.error(err);
-        await interaction.reply({ content: '❌ Failed to remove user from the thread.' });
-      }
-    } else if (commandName === 'reset-all') {
-      await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-      const adminIds = (process.env.ADMIN_IDS || '').split(',');
-      if (!adminIds.includes(interaction.user.id)) {
-        return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
-      }
+    const user = interaction.options.getUser('user');
+    try {
+      await interaction.channel.members.add(user.id);
+      await interaction.reply({ content: `✅ Added ${user} to the ticket.` });
+    } catch (err) {
+      console.error(err);
+      await interaction.reply({ content: '❌ Failed to add user to the thread.' });
+    }
 
-      try {
-        console.log('🔄 Starting data reset...');
+  } else if (commandName === 'remove-user') {
+    if (!interaction.channel.isThread()) {
+      return await interaction.reply({ content: '❌ This command can only be used in active ticket threads.', ephemeral: true });
+    }
 
-        // Reset user balances and resources
-        const usersResult = await db.query(`
+    const user = interaction.options.getUser('user');
+    try {
+      await interaction.channel.members.remove(user.id);
+      await interaction.reply({ content: `✅ Removed ${user} from the ticket.` });
+    } catch (err) {
+      console.error(err);
+      await interaction.reply({ content: '❌ Failed to remove user from the thread.' });
+    }
+  }
+} else if (commandName === 'ticket-panel-edit') {
+  const adminIds = (process.env.ADMIN_IDS || '').split(',');
+  if (!adminIds.includes(interaction.user.id)) {
+    return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
+  }
+
+  const channel = interaction.options.getChannel('channel');
+  const messageId = interaction.options.getString('message_id');
+  const title = interaction.options.getString('title');
+  const description = interaction.options.getString('description');
+  const imageUrl = interaction.options.getString('image_url');
+  const thumbnailUrl = interaction.options.getString('thumbnail_url');
+
+  try {
+    if (!channel.isTextBased()) return interaction.reply({ content: 'Invalid channel type.', ephemeral: true });
+    const message = await channel.messages.fetch(messageId);
+    if (!message) return interaction.reply({ content: 'Message not found.', ephemeral: true });
+
+    if (message.author.id !== client.user.id) return interaction.reply({ content: 'I can only edit my own messages.', ephemeral: true });
+
+    const oldEmbed = message.embeds[0];
+    if (!oldEmbed) return interaction.reply({ content: 'Message has no embed to edit.', ephemeral: true });
+
+    const newEmbed = EmbedBuilder.from(oldEmbed);
+    if (title) newEmbed.setTitle(title);
+    if (description) newEmbed.setDescription(description);
+    if (imageUrl) newEmbed.setImage(imageUrl);
+    if (thumbnailUrl) newEmbed.setThumbnail(thumbnailUrl);
+
+    await message.edit({ embeds: [newEmbed] });
+    await interaction.reply({ content: '✅ Ticket panel updated successfully.', ephemeral: true });
+
+  } catch (error) {
+    console.error('Error editing panel:', error);
+    await interaction.reply({ content: `❌ Failed to edit panel: ${error.message}`, ephemeral: true });
+  }
+
+} else if (commandName === 'reset-all') {
+  await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+  const adminIds = (process.env.ADMIN_IDS || '').split(',');
+  if (!adminIds.includes(interaction.user.id)) {
+    return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
+  }
+
+  try {
+    console.log('🔄 Starting data reset...');
+
+    // Reset user balances and resources
+    const usersResult = await db.query(`
           UPDATE users 
           SET balance = 0, 
               gold = 0, 
@@ -1379,757 +1506,759 @@ client.on('interactionCreate', async interaction => {
               daily_streak = 0,
               last_daily = NULL
         `);
-        console.log(`✅ Reset ${usersResult.rowCount || 0} user records`);
+    console.log(`✅ Reset ${usersResult.rowCount || 0} user records`);
 
-        // Reset message counts
-        const messagesResult = await db.query(`
+    // Reset message counts
+    const messagesResult = await db.query(`
           UPDATE message_counts 
           SET count = 0, 
               rewarded_messages = 0
         `);
-        console.log(`✅ Reset ${messagesResult.rowCount || 0} message count records`);
+    console.log(`✅ Reset ${messagesResult.rowCount || 0} message count records`);
 
-        // Reset voice times
-        const voiceResult = await db.query(`
+    // Reset voice times
+    const voiceResult = await db.query(`
           UPDATE voice_times 
           SET minutes = 0, 
               rewarded_minutes = 0
         `);
-        console.log(`✅ Reset ${voiceResult.rowCount || 0} voice time records`);
+    console.log(`✅ Reset ${voiceResult.rowCount || 0} voice time records`);
 
-        // Reset invites
-        const invitesResult = await db.query(`
+    // Reset invites
+    const invitesResult = await db.query(`
           UPDATE invites 
           SET invites = 0
         `);
-        console.log(`✅ Reset ${invitesResult.rowCount || 0} invite records`);
+    console.log(`✅ Reset ${invitesResult.rowCount || 0} invite records`);
 
-        // Reset boosts
-        const boostsResult = await db.query(`
+    // Reset boosts
+    const boostsResult = await db.query(`
           UPDATE boosts 
           SET boosts = 0
         `);
-        console.log(`✅ Reset ${boostsResult.rowCount || 0} boost records`);
+    console.log(`✅ Reset ${boostsResult.rowCount || 0} boost records`);
 
-        // Reset invited_members tracking
-        const invitedResult = await db.query(`
+    // Reset invited_members tracking
+    const invitedResult = await db.query(`
           DELETE FROM invited_members
         `);
-        console.log(`✅ Deleted ${invitedResult.rowCount || 0} invited member records`);
+    console.log(`✅ Deleted ${invitedResult.rowCount || 0} invited member records`);
 
-        // Ensure server_stats exists and reset pool to default
-        await db.query(`
+    // Ensure server_stats exists and reset pool to default
+    await db.query(`
           INSERT INTO server_stats (id, pool_balance) 
           VALUES ($1, 100000) 
           ON CONFLICT (id) 
           DO UPDATE SET pool_balance = 100000
         `, [interaction.guildId]);
-        console.log(`✅ Reset server pool to 100,000`);
+    console.log(`✅ Reset server pool to 100,000`);
 
-        // Reset Google Sheet
-        const sheetResetResult = await resetGoogleSheet();
-        if (sheetResetResult.success) {
-          console.log(`✅ ${sheetResetResult.message}`);
-        } else {
-          console.log(`⚠️ Google Sheet reset failed: ${sheetResetResult.message}`);
-        }
-
-        console.log('🎉 All data reset completed successfully!');
-        const resetMessage = '✅ **All data has been reset successfully!**\n\n- All user balances: **0** 💰\n- All resources (Gold, Wood, Food, Stone): **0**\n- All message counts: **0**\n- All voice times: **0**\n- All invites: **0**\n- All boosts: **0**\n- Server pool: **100,000** 💰\n- Invite tracking: **Cleared**' +
-          (sheetResetResult.success ? '\n- Google Sheet: **Reset** ✅' : '\n- Google Sheet: **Reset failed** ⚠️');
-        await interaction.editReply({ content: resetMessage });
-        logActivity('🔄 Admin Reset', `<@${interaction.user.id}> reset ALL user data (balances, stats, resources${sheetResetResult.success ? ', Google Sheet' : ''}).`, 'Red');
-      } catch (error) {
-        console.error('❌ Error resetting data:', error);
-        await interaction.editReply({ content: `❌ Error resetting data: ${error.message}\n\nPlease check the console for more details.` });
-      }
-    } else if (commandName === 'add-emoji') {
-      const adminIds = (process.env.ADMIN_IDS || '').split(',');
-      if (!adminIds.includes(interaction.user.id)) {
-        return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
-      }
-
-      const image = interaction.options.getAttachment('image');
-      const name = interaction.options.getString('name');
-
-      await interaction.deferReply({ ephemeral: true });
-
-      try {
-        // Upload to Bot Application (Global Emojis)
-        await client.application.fetch();
-        const emoji = await client.application.emojis.create({ attachment: image.url, name: name });
-        await interaction.editReply({ content: `✅ **Bot Emoji** created successfully! ${emoji}\nID: \`${emoji.id}\`\nUsage: \`${emoji.toString()}\`` });
-      } catch (error) {
-        console.error('Error creating app emoji:', error);
-        // Fallback to Guild Emoji? The user explicitly asked for Bot Emoji.
-        await interaction.editReply({ content: `❌ Failed to create **Bot** emoji. Error: ${error.message}\n\n*Make sure the bot is owned by you or a Team and has slots available.*` });
-      }
-
-    } else if (commandName === 'giveaway') {
-      const adminIds = (process.env.ADMIN_IDS || '').split(',');
-      if (!adminIds.includes(interaction.user.id)) {
-        return interaction.reply('🚫 You do not have permission to use this command.');
-      }
-
-      const duration = interaction.options.getString('duration');
-      const totalPrize = interaction.options.getNumber('total_prize');
-      const winnerCount = interaction.options.getInteger('winners') || 1;
-      const entryCost = interaction.options.getNumber('entry_cost') || 10; // Default to 10 if not specified
-      const pingRole = interaction.options.getRole('ping_role') || (DEFAULT_GIVEAWAY_PING_ROLE ? interaction.guild.roles.cache.get(DEFAULT_GIVEAWAY_PING_ROLE) : null);
-
-      const modal = new ModalBuilder()
-        .setCustomId(`giveaway_modal_${Date.now()}_${pingRole?.id || 'none'}`)
-        .setTitle('Create Giveaway');
-
-      const durationInput = new TextInputBuilder()
-        .setCustomId('giveaway_duration')
-        .setLabel('Duration (e.g., 1h, 30m, 2d)')
-        .setPlaceholder('1h, 30m, 2d...')
-        .setValue(duration)
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const totalPrizeInput = new TextInputBuilder()
-        .setCustomId('giveaway_total_prize')
-        .setLabel('Total Prize (Sovereign Pounds)')
-        .setPlaceholder('Enter the total amount to distribute...')
-        .setValue(totalPrize.toString())
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const entryCostInput = new TextInputBuilder()
-        .setCustomId('giveaway_entry_cost')
-        .setLabel('Entry Cost (Sovereign Pounds)')
-        .setPlaceholder('Enter the cost to participate...')
-        .setValue(entryCost.toString())
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const winnersInput = new TextInputBuilder()
-        .setCustomId('giveaway_winners')
-        .setLabel('Number of Winners')
-        .setPlaceholder('1')
-        .setValue(winnerCount.toString())
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(durationInput),
-        new ActionRowBuilder().addComponents(totalPrizeInput),
-        new ActionRowBuilder().addComponents(entryCostInput),
-        new ActionRowBuilder().addComponents(winnersInput)
-      );
-
-      await interaction.showModal(modal);
+    // Reset Google Sheet
+    const sheetResetResult = await resetGoogleSheet();
+    if (sheetResetResult.success) {
+      console.log(`✅ ${sheetResetResult.message}`);
+    } else {
+      console.log(`⚠️ Google Sheet reset failed: ${sheetResetResult.message}`);
     }
-  } else if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'shop_buy_select') {
-      const itemId = interaction.values[0];
-      try {
-        const { rows } = await safeQuery('SELECT * FROM shop_items WHERE id = $1', [itemId]);
-        if (rows.length === 0) return interaction.reply({ content: `❌ Item no longer exists.`, ephemeral: true });
-        const item = rows[0];
+
+    console.log('🎉 All data reset completed successfully!');
+    const resetMessage = '✅ **All data has been reset successfully!**\n\n- All user balances: **0** 💰\n- All resources (Gold, Wood, Food, Stone): **0**\n- All message counts: **0**\n- All voice times: **0**\n- All invites: **0**\n- All boosts: **0**\n- Server pool: **100,000** 💰\n- Invite tracking: **Cleared**' +
+      (sheetResetResult.success ? '\n- Google Sheet: **Reset** ✅' : '\n- Google Sheet: **Reset failed** ⚠️');
+    await interaction.editReply({ content: resetMessage });
+    logActivity('🔄 Admin Reset', `<@${interaction.user.id}> reset ALL user data (balances, stats, resources${sheetResetResult.success ? ', Google Sheet' : ''}).`, 'Red');
+  } catch (error) {
+    console.error('❌ Error resetting data:', error);
+    await interaction.editReply({ content: `❌ Error resetting data: ${error.message}\n\nPlease check the console for more details.` });
+  }
+} else if (commandName === 'add-emoji') {
+  const adminIds = (process.env.ADMIN_IDS || '').split(',');
+  if (!adminIds.includes(interaction.user.id)) {
+    return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
+  }
+
+  const image = interaction.options.getAttachment('image');
+  const name = interaction.options.getString('name');
+
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    // Upload to Bot Application (Global Emojis)
+    await client.application.fetch();
+    const emoji = await client.application.emojis.create({ attachment: image.url, name: name });
+    await interaction.editReply({ content: `✅ **Bot Emoji** created successfully! ${emoji}\nID: \`${emoji.id}\`\nUsage: \`${emoji.toString()}\`` });
+  } catch (error) {
+    console.error('Error creating app emoji:', error);
+    // Fallback to Guild Emoji? The user explicitly asked for Bot Emoji.
+    await interaction.editReply({ content: `❌ Failed to create **Bot** emoji. Error: ${error.message}\n\n*Make sure the bot is owned by you or a Team and has slots available.*` });
+  }
+
+} else if (commandName === 'giveaway') {
+  const adminIds = (process.env.ADMIN_IDS || '').split(',');
+  if (!adminIds.includes(interaction.user.id)) {
+    return interaction.reply('🚫 You do not have permission to use this command.');
+  }
+
+  const duration = interaction.options.getString('duration');
+  const totalPrize = interaction.options.getNumber('total_prize');
+  const winnerCount = interaction.options.getInteger('winners') || 1;
+  const entryCost = interaction.options.getNumber('entry_cost') || 10; // Default to 10 if not specified
+  const pingRole = interaction.options.getRole('ping_role') || (DEFAULT_GIVEAWAY_PING_ROLE ? interaction.guild.roles.cache.get(DEFAULT_GIVEAWAY_PING_ROLE) : null);
+
+  const modal = new ModalBuilder()
+    .setCustomId(`giveaway_modal_${Date.now()}_${pingRole?.id || 'none'}`)
+    .setTitle('Create Giveaway');
+
+  const durationInput = new TextInputBuilder()
+    .setCustomId('giveaway_duration')
+    .setLabel('Duration (e.g., 1h, 30m, 2d)')
+    .setPlaceholder('1h, 30m, 2d...')
+    .setValue(duration)
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  const totalPrizeInput = new TextInputBuilder()
+    .setCustomId('giveaway_total_prize')
+    .setLabel('Total Prize (Sovereign Pounds)')
+    .setPlaceholder('Enter the total amount to distribute...')
+    .setValue(totalPrize.toString())
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  const entryCostInput = new TextInputBuilder()
+    .setCustomId('giveaway_entry_cost')
+    .setLabel('Entry Cost (Sovereign Pounds)')
+    .setPlaceholder('Enter the cost to participate...')
+    .setValue(entryCost.toString())
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  const winnersInput = new TextInputBuilder()
+    .setCustomId('giveaway_winners')
+    .setLabel('Number of Winners')
+    .setPlaceholder('1')
+    .setValue(winnerCount.toString())
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(durationInput),
+    new ActionRowBuilder().addComponents(totalPrizeInput),
+    new ActionRowBuilder().addComponents(entryCostInput),
+    new ActionRowBuilder().addComponents(winnersInput)
+  );
+
+  await interaction.showModal(modal);
+}
+} else if (interaction.isStringSelectMenu()) {
+  if (interaction.customId === 'shop_buy_select') {
+    const itemId = interaction.values[0];
+    try {
+      const { rows } = await safeQuery('SELECT * FROM shop_items WHERE id = $1', [itemId]);
+      if (rows.length === 0) return interaction.reply({ content: `❌ Item no longer exists.`, ephemeral: true });
+      const item = rows[0];
 
 
-        // Stock Check
-        if (item.stock !== -1 && item.stock <= 0) {
-          return interaction.reply({ content: `❌ This item is currently out of stock.`, ephemeral: true });
-        }
+      // Stock Check
+      if (item.stock !== -1 && item.stock <= 0) {
+        return interaction.reply({ content: `❌ This item is currently out of stock.`, ephemeral: true });
+      }
 
-        const { rows: userRows } = await safeQuery('SELECT balance FROM users WHERE id = $1', [interaction.user.id]);
-        const balance = userRows[0]?.balance || 0;
+      const { rows: userRows } = await safeQuery('SELECT balance FROM users WHERE id = $1', [interaction.user.id]);
+      const balance = userRows[0]?.balance || 0;
 
-        if (balance < item.price) {
-          return interaction.reply({ content: `❌ Insufficient funds. You need **${item.price.toLocaleString('en-US')}** 💰 to buy **${item.name}**.`, ephemeral: true });
-        }
+      if (balance < item.price) {
+        return interaction.reply({ content: `❌ Insufficient funds. You need **${item.price.toLocaleString('en-US')}** 💰 to buy **${item.name}**.`, ephemeral: true });
+      }
 
-        await safeQuery('UPDATE users SET balance = balance - $1 WHERE id = $2', [item.price, interaction.user.id]);
+      await safeQuery('UPDATE users SET balance = balance - $1 WHERE id = $2', [item.price, interaction.user.id]);
 
-        // Decrement Stock
-        if (item.stock !== -1) {
-          await safeQuery('UPDATE shop_items SET stock = stock - 1 WHERE id = $1', [item.id]);
-        }
+      // Decrement Stock
+      if (item.stock !== -1) {
+        await safeQuery('UPDATE shop_items SET stock = stock - 1 WHERE id = $1', [item.id]);
+      }
 
-        let rewardMsg = '';
-        if (item.resource_type) {
-          const colName = item.resource_type.toLowerCase();
-          if (['gold', 'wood', 'food', 'stone'].includes(colName)) {
-            const qty = item.quantity || 1;
-            await safeQuery(`UPDATE users SET ${colName} = ${colName} + $1 WHERE id = $2`, [qty, interaction.user.id]);
-            rewardMsg = `Received **${qty.toLocaleString('en-US')}** ${item.resource_type}.`;
-            await logPurchaseToSheet(interaction.user.tag, colName, qty, item.price);
-          } else {
-            await logItemPurchaseToSheet(interaction.user.tag, item.name, item.price);
-          }
+      let rewardMsg = '';
+      if (item.resource_type) {
+        const colName = item.resource_type.toLowerCase();
+        if (['gold', 'wood', 'food', 'stone'].includes(colName)) {
+          const qty = item.quantity || 1;
+          await safeQuery(`UPDATE users SET ${colName} = ${colName} + $1 WHERE id = $2`, [qty, interaction.user.id]);
+          rewardMsg = `Received **${qty.toLocaleString('en-US')}** ${item.resource_type}.`;
+          await logPurchaseToSheet(interaction.user.tag, colName, qty, item.price);
         } else {
           await logItemPurchaseToSheet(interaction.user.tag, item.name, item.price);
         }
-
-        if (item.role_id) {
-          const role = interaction.guild.roles.cache.get(item.role_id);
-          if (role) {
-            await interaction.member.roles.add(role);
-            rewardMsg += ` Assigned role **${role.name}**.`;
-          }
-        }
-
-        if (item.requires_ticket) {
-          try {
-            const safeName = (item.name || 'item').replace(/[^a-zA-Z0-9-]/g, '');
-            const threadName = `order-${interaction.user.username}-${safeName}`.substring(0, 32);
-
-            const thread = await interaction.channel.threads.create({
-              name: threadName,
-              type: ChannelType.PrivateThread,
-              autoArchiveDuration: 1440,
-              reason: 'Shop Purchase Ticket'
-            });
-            await thread.members.add(interaction.user.id);
-
-            const orderEmbed = new EmbedBuilder()
-              .setTitle('🛍️ New Order')
-              .setDescription(`User <@${interaction.user.id}> purchased **${item.name}**.\n\n**Price:** ${item.price.toLocaleString('en-US')} 💰\n**Status:** Paid ✅\n\nPlease describe your request below. Staff will be with you shortly.`)
-              .setColor('Green');
-
-            const adminIds = (process.env.ADMIN_IDS || '').split(',');
-            const adminPings = adminIds.map(id => `<@${id}>`).join(' ');
-
-            await thread.send({ content: `${adminPings} <@${interaction.user.id}>`, embeds: [orderEmbed] });
-            rewardMsg += `\n🎫 **Ticket created:** <#${thread.id}>`;
-          } catch (error) {
-            console.error('Failed to create ticket thread:', error);
-            rewardMsg += `\n⚠️ Failed to create ticket (Check permissions).`;
-          }
-        }
-
-        await interaction.reply({ content: `✅ Successfully purchased **${item.name}** for **${item.price.toLocaleString('en-US')}** 💰.\n${rewardMsg}`, ephemeral: true });
-        logActivity('🛒 Shop Purchase', `<@${interaction.user.id}> bought **${item.name}** for ${item.price} 💰.\n${rewardMsg}`, 'Blue');
-
-      } catch (err) {
-        console.error(err);
-        interaction.reply({ content: `❌ Transaction failed.`, ephemeral: true });
+      } else {
+        await logItemPurchaseToSheet(interaction.user.tag, item.name, item.price);
       }
-    } else if (interaction.customId === 'ticket_category_select') {
-      const catId = interaction.values[0];
-      try {
-        const { rows } = await safeQuery('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
-        if (rows.length === 0) return interaction.reply({ content: 'Category not found.', ephemeral: true });
 
-        const category = rows[0];
-        let parsedQs = category.form_questions;
-        if (typeof parsedQs === 'string') try { parsedQs = JSON.parse(parsedQs); } catch (e) { }
-        if (!Array.isArray(parsedQs)) parsedQs = [];
-
-        if (parsedQs.length === 0) parsedQs = ['Please describe your request:'];
-
-        const modal = new ModalBuilder()
-          .setCustomId(`modal_ticket_create_${catId}`)
-          .setTitle(`Open Ticket: ${category.name}`);
-
-        parsedQs.slice(0, 5).forEach((q, i) => {
-          modal.addComponents(new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId(`q_${i}`)
-              .setLabel(q.substring(0, 45))
-              .setStyle(TextInputStyle.Paragraph)
-              .setRequired(true)
-          ));
-        });
-
-        await interaction.showModal(modal);
-      } catch (err) {
-        console.error(err);
-        interaction.reply({ content: 'Error opening form.', ephemeral: true });
+      if (item.role_id) {
+        const role = interaction.guild.roles.cache.get(item.role_id);
+        if (role) {
+          await interaction.member.roles.add(role);
+          rewardMsg += ` Assigned role **${role.name}**.`;
+        }
       }
+
+      if (item.requires_ticket) {
+        try {
+          const safeName = (item.name || 'item').replace(/[^a-zA-Z0-9-]/g, '');
+          const threadName = `order-${interaction.user.username}-${safeName}`.substring(0, 32);
+
+          const thread = await interaction.channel.threads.create({
+            name: threadName,
+            type: ChannelType.PrivateThread,
+            autoArchiveDuration: 1440,
+            reason: 'Shop Purchase Ticket'
+          });
+          await thread.members.add(interaction.user.id);
+
+          const orderEmbed = new EmbedBuilder()
+            .setTitle('🛍️ New Order')
+            .setDescription(`User <@${interaction.user.id}> purchased **${item.name}**.\n\n**Price:** ${item.price.toLocaleString('en-US')} 💰\n**Status:** Paid ✅\n\nPlease describe your request below. Staff will be with you shortly.`)
+            .setColor('Green');
+
+          const adminIds = (process.env.ADMIN_IDS || '').split(',');
+          const adminPings = adminIds.map(id => `<@${id}>`).join(' ');
+
+          await thread.send({ content: `${adminPings} <@${interaction.user.id}>`, embeds: [orderEmbed] });
+          rewardMsg += `\n🎫 **Ticket created:** <#${thread.id}>`;
+        } catch (error) {
+          console.error('Failed to create ticket thread:', error);
+          rewardMsg += `\n⚠️ Failed to create ticket (Check permissions).`;
+        }
+      }
+
+      await interaction.reply({ content: `✅ Successfully purchased **${item.name}** for **${item.price.toLocaleString('en-US')}** 💰.\n${rewardMsg}`, ephemeral: true });
+      logActivity('🛒 Shop Purchase', `<@${interaction.user.id}> bought **${item.name}** for ${item.price} 💰.\n${rewardMsg}`, 'Blue');
+
+    } catch (err) {
+      console.error(err);
+      interaction.reply({ content: `❌ Transaction failed.`, ephemeral: true });
     }
-  } else if (interaction.isModalSubmit()) { // Handle Modal Submissions
-    if (interaction.customId === 'modal_wizard_cat') {
-      const name = interaction.fields.getTextInputValue('cat_name');
-      const emoji = interaction.fields.getTextInputValue('cat_emoji');
-      const roleId = interaction.fields.getTextInputValue('cat_role_id');
+    interaction.reply({ content: `❌ Transaction failed.`, ephemeral: true });
+  }
+}
+} else if (interaction.customId === 'ticket_select') {
+  const catId = interaction.values[0];
+  try {
+    const { rows } = await safeQuery('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
+    if (rows.length === 0) return interaction.reply({ content: 'Category not found.', ephemeral: true });
 
-      try {
-        const { rows } = await db.query(
-          'INSERT INTO ticket_categories (guild_id, name, emoji, staff_role_id, form_questions) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-          [interaction.guildId, name, emoji, roleId, JSON.stringify([])]
-        );
-        console.log('[Wizard Debug] Create Category Rows:', rows);
-        const newCatId = rows[0]?.id;
+    const category = rows[0];
+    let parsedQs = category.form_questions;
+    if (typeof parsedQs === 'string') try { parsedQs = JSON.parse(parsedQs); } catch (e) { }
+    if (!Array.isArray(parsedQs)) parsedQs = [];
 
-        if (!newCatId) {
-          throw new Error('Failed to retrieve new category ID');
-        }
+    if (parsedQs.length === 0) parsedQs = ['Please describe your request:'];
 
-        const embed = new EmbedBuilder()
-          .setTitle('Ticket Creation Zone')
-          .setDescription(`**Category:** ${emoji} ${name}\n**Role:** <@&${roleId}>\n\n**Questions:**\n*None*`)
-          .setColor('Green')
-          .setFooter({ text: 'Sovereign Empire • Ticket System', iconURL: interaction.guild.iconURL() });
+    const modal = new ModalBuilder()
+      .setCustomId(`modal_ticket_create_${catId}`)
+      .setTitle(`Open Ticket: ${category.name}`);
 
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`wizard_add_single_q_${newCatId}`).setLabel('Add Question').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId(`wizard_finish_${newCatId}`).setLabel('Finish Setup').setStyle(ButtonStyle.Success)
-        );
+    parsedQs.slice(0, 5).forEach((q, i) => {
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId(`q_${i}`)
+          .setLabel(q.substring(0, 45))
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+      ));
+    });
 
-        await interaction.reply({ embeds: [embed], components: [row] });
-        // ...
-      } catch (err) {
-        console.error(err);
-        await interaction.reply({ content: '❌ Error creating category. Check role ID.', ephemeral: true });
+    await interaction.showModal(modal);
+  } catch (err) {
+    console.error(err);
+    interaction.reply({ content: 'Error opening form.', ephemeral: true });
+  }
+} else if (interaction.isModalSubmit()) { // Handle Modal Submissions
+  if (interaction.customId === 'modal_wizard_cat') {
+    const name = interaction.fields.getTextInputValue('cat_name');
+    const emoji = interaction.fields.getTextInputValue('cat_emoji');
+    const roleId = interaction.fields.getTextInputValue('cat_role_id');
+
+    try {
+      const { rows } = await db.query(
+        'INSERT INTO ticket_categories (guild_id, name, emoji, staff_role_id, form_questions) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        [interaction.guildId, name, emoji, roleId, JSON.stringify([])]
+      );
+      console.log('[Wizard Debug] Create Category Rows:', rows);
+      const newCatId = rows[0]?.id;
+
+      if (!newCatId) {
+        throw new Error('Failed to retrieve new category ID');
       }
-    } else if (interaction.customId.startsWith('modal_wizard_single_q_')) {
-      const catId = interaction.customId.split('_')[4];
-      console.log('[Wizard Debug] Modal Submit for Add Question. CatID:', catId);
-      const question = interaction.fields.getTextInputValue('question');
 
-      // Fetch existing questions
-      const { rows } = await db.query('SELECT form_questions, name, emoji, staff_role_id FROM ticket_categories WHERE id = $1', [catId]);
-      if (rows.length === 0) return interaction.reply({ content: 'Category not found.', ephemeral: true });
-
-      let questions = rows[0].form_questions || [];
-      // Ensure questions is an array
-      if (typeof questions === 'string') {
-        try { questions = JSON.parse(questions); } catch (e) { questions = []; }
-      }
-      if (!Array.isArray(questions)) questions = [];
-
-      questions.push(question);
-
-      await db.query('UPDATE ticket_categories SET form_questions = $1 WHERE id = $2', [JSON.stringify(questions), catId]);
-
-      // Update the embed in the thread
       const embed = new EmbedBuilder()
         .setTitle('Ticket Creation Zone')
-        .setDescription(`**Category:** ${rows[0].emoji} ${rows[0].name}\n**Role:** <@&${rows[0].staff_role_id}>\n\n**Questions:**\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}`)
-        .setColor('Green');
+        .setDescription(`**Category:** ${emoji} ${name}\n**Role:** <@&${roleId}>\n\n**Questions:**\n*None*`)
+        .setColor('Green')
+        .setFooter({ text: 'Sovereign Empire • Ticket System', iconURL: interaction.guild.iconURL() });
 
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`wizard_add_single_q_${catId}`).setLabel('Add Question').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`wizard_finish_${catId}`).setLabel('Finish Setup').setStyle(ButtonStyle.Success)
+        new ButtonBuilder().setCustomId(`wizard_add_single_q_${newCatId}`).setLabel('Add Question').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`wizard_finish_${newCatId}`).setLabel('Finish Setup').setStyle(ButtonStyle.Success)
       );
 
-      // Update the message that spawned the modal (the embed with buttons)
-      await interaction.update({ embeds: [embed], components: [row] });
+      await interaction.reply({ embeds: [embed], components: [row] });
+      // ...
+    } catch (err) {
+      console.error(err);
+      await interaction.reply({ content: '❌ Error creating category. Check role ID.', ephemeral: true });
+    }
+  } else if (interaction.customId.startsWith('modal_wizard_single_q_')) {
+    const catId = interaction.customId.split('_')[4];
+    console.log('[Wizard Debug] Modal Submit for Add Question. CatID:', catId);
+    const question = interaction.fields.getTextInputValue('question');
 
-    } else if (interaction.customId.startsWith('modal_ticket_create_')) {
-      const catId = interaction.customId.split('_')[3];
+    // Fetch existing questions
+    const { rows } = await db.query('SELECT form_questions, name, emoji, staff_role_id FROM ticket_categories WHERE id = $1', [catId]);
+    if (rows.length === 0) return interaction.reply({ content: 'Category not found.', ephemeral: true });
 
-      // Fetch category to get question texts corresponding to answers
-      const { rows } = await db.query('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
-      if (rows.length === 0) return interaction.reply({ content: 'Category not found.', ephemeral: true });
-      const category = rows[0];
-      const formQuestions = category.form_questions || [];
+    let questions = rows[0].form_questions || [];
+    // Ensure questions is an array
+    if (typeof questions === 'string') {
+      try { questions = JSON.parse(questions); } catch (e) { questions = []; }
+    }
+    if (!Array.isArray(questions)) questions = [];
 
-      const answers = [];
-      formQuestions.slice(0, 5).forEach((q, index) => {
-        const answer = interaction.fields.getTextInputValue(`q_${index}`);
-        answers.push({ question: q, answer: answer });
+    questions.push(question);
+
+    await db.query('UPDATE ticket_categories SET form_questions = $1 WHERE id = $2', [JSON.stringify(questions), catId]);
+
+    // Update the embed in the thread
+    const embed = new EmbedBuilder()
+      .setTitle('Ticket Creation Zone')
+      .setDescription(`**Category:** ${rows[0].emoji} ${rows[0].name}\n**Role:** <@&${rows[0].staff_role_id}>\n\n**Questions:**\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}`)
+      .setColor('Green');
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`wizard_add_single_q_${catId}`).setLabel('Add Question').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`wizard_finish_${catId}`).setLabel('Finish Setup').setStyle(ButtonStyle.Success)
+    );
+
+    // Update the message that spawned the modal (the embed with buttons)
+    await interaction.update({ embeds: [embed], components: [row] });
+
+  } else if (interaction.customId.startsWith('modal_ticket_create_')) {
+    const catId = interaction.customId.split('_')[3];
+
+    // Fetch category to get question texts corresponding to answers
+    const { rows } = await db.query('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
+    if (rows.length === 0) return interaction.reply({ content: 'Category not found.', ephemeral: true });
+    const category = rows[0];
+    const formQuestions = category.form_questions || [];
+
+    const answers = [];
+    formQuestions.slice(0, 5).forEach((q, index) => {
+      const answer = interaction.fields.getTextInputValue(`q_${index}`);
+      answers.push({ question: q, answer: answer });
+    });
+
+    // NOW create the thread with answers
+    const guild = interaction.guild;
+    const channelName = `ticket-${interaction.user.username}-${category.name}`;
+
+    try {
+      const ticketThread = await interaction.channel.threads.create({
+        name: channelName,
+        type: ChannelType.PrivateThread,
+        reason: `Ticket created by ${interaction.user.tag}`,
+        autoArchiveDuration: 1440,
       });
+      await ticketThread.members.add(interaction.user.id);
 
-      // NOW create the thread with answers
-      const guild = interaction.guild;
-      const channelName = `ticket-${interaction.user.username}-${category.name}`;
+      await db.query(
+        'INSERT INTO tickets (channel_id, guild_id, user_id, category_id) VALUES ($1, $2, $3, $4)',
+        [ticketThread.id, guild.id, interaction.user.id, category.id]
+      );
 
-      try {
-        const ticketThread = await interaction.channel.threads.create({
-          name: channelName,
-          type: ChannelType.PrivateThread,
-          reason: `Ticket created by ${interaction.user.tag}`,
-          autoArchiveDuration: 1440,
-        });
-        await ticketThread.members.add(interaction.user.id);
+      const answerFields = answers.map(a => `**${a.question}**\n${a.answer}`).join('\n\n');
 
-        await db.query(
-          'INSERT INTO tickets (channel_id, guild_id, user_id, category_id) VALUES ($1, $2, $3, $4)',
-          [ticketThread.id, guild.id, interaction.user.id, category.id]
-        );
+      const welcomeEmbed = new EmbedBuilder()
+        .setTitle(`${category.emoji} ${category.name} Ticket`)
+        .setDescription(`Welcome <@${interaction.user.id}>!\n\n${answerFields}\n\n<@&${category.staff_role_id}> will be with you shortly.`)
+        .setColor('Green');
 
-        const answerFields = answers.map(a => `**${a.question}**\n${a.answer}`).join('\n\n');
+      const closeButton = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('close_ticket_btn').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
+      );
 
-        const welcomeEmbed = new EmbedBuilder()
-          .setTitle(`${category.emoji} ${category.name} Ticket`)
-          .setDescription(`Welcome <@${interaction.user.id}>!\n\n${answerFields}\n\n<@&${category.staff_role_id}> will be with you shortly.`)
-          .setColor('Green');
+      await ticketThread.send({ embeds: [welcomeEmbed], components: [closeButton] });
+      await interaction.reply({ content: `✅ Ticket created: <#${ticketThread.id}>`, ephemeral: true });
 
-        const closeButton = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('close_ticket_btn').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
-        );
+    } catch (err) {
+      console.error(err);
+      await interaction.reply({ content: '❌ Failed to create ticket.', ephemeral: true });
+    }
 
-        await ticketThread.send({ embeds: [welcomeEmbed], components: [closeButton] });
-        await interaction.reply({ content: `✅ Ticket created: <#${ticketThread.id}>`, ephemeral: true });
+  } else if (interaction.customId.startsWith('buy_modal_')) {
+    const resource = interaction.customId.split('_')[2];
+    const quantityString = interaction.fields.getTextInputValue('hp_quantity_input');
+    const cost = parseShorthand(quantityString);
 
-      } catch (err) {
-        console.error(err);
-        await interaction.reply({ content: '❌ Failed to create ticket.', ephemeral: true });
-      }
+    if (isNaN(cost) || cost <= 0) {
+      return interaction.reply({ content: '⚠️ Please provide a valid quantity of Sovereign Pounds to spend.', flags: [MessageFlags.Ephemeral] });
+    }
 
-    } else if (interaction.customId.startsWith('buy_modal_')) {
-      const resource = interaction.customId.split('_')[2];
-      const quantityString = interaction.fields.getTextInputValue('hp_quantity_input');
-      const cost = parseShorthand(quantityString);
+    // Define how many resources you get for 10 HP
+    const quantities = { gold: 50000, wood: 150000, food: 150000, stone: 112000 };
+    const pricePerPackage = 10;
 
-      if (isNaN(cost) || cost <= 0) {
-        return interaction.reply({ content: '⚠️ Please provide a valid quantity of Sovereign Pounds to spend.', flags: [MessageFlags.Ephemeral] });
-      }
+    // Calculate the proportional amount of resources
+    const desiredResourceAmount = Math.floor((cost / pricePerPackage) * quantities[resource]);
 
-      // Define how many resources you get for 10 HP
-      const quantities = { gold: 50000, wood: 150000, food: 150000, stone: 112000 };
-      const pricePerPackage = 10;
+    if (desiredResourceAmount < 1) {
+      return interaction.reply({ content: '⚠️ The amount of Sovereign Pounds is too small to buy at least 1 unit of this resource.', flags: [MessageFlags.Ephemeral] });
+    }
 
-      // Calculate the proportional amount of resources
-      const desiredResourceAmount = Math.floor((cost / pricePerPackage) * quantities[resource]);
+    const confirmationEmbed = new EmbedBuilder()
+      .setTitle('🛒 Purchase Confirmation')
+      .setDescription(`You are about to spend **${cost.toLocaleString('en-US')}** 💰 to receive **${desiredResourceAmount.toLocaleString('en-US')} ${resource}**.\n\nPlease confirm your purchase.`)
+      .setColor('Orange');
 
-      if (desiredResourceAmount < 1) {
-        return interaction.reply({ content: '⚠️ The amount of Sovereign Pounds is too small to buy at least 1 unit of this resource.', flags: [MessageFlags.Ephemeral] });
-      }
+    const row = new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder().setCustomId(`confirm_buy_${resource}_${cost}_${desiredResourceAmount}`).setLabel('Confirm').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('cancel_buy').setLabel('Cancel').setStyle(ButtonStyle.Danger),
+      );
 
-      const confirmationEmbed = new EmbedBuilder()
-        .setTitle('🛒 Purchase Confirmation')
-        .setDescription(`You are about to spend **${cost.toLocaleString('en-US')}** 💰 to receive **${desiredResourceAmount.toLocaleString('en-US')} ${resource}**.\n\nPlease confirm your purchase.`)
-        .setColor('Orange');
+    await interaction.reply({
+      embeds: [confirmationEmbed],
+      components: [row],
+      flags: [MessageFlags.Ephemeral],
+    });
+  } else if (interaction.customId.startsWith('giveaway_modal_')) {
+    const durationStr = interaction.fields.getTextInputValue('giveaway_duration');
+    const totalPrize = parseFloat(interaction.fields.getTextInputValue('giveaway_total_prize'));
+    const entryCost = parseFloat(interaction.fields.getTextInputValue('giveaway_entry_cost'));
+    const winnerCount = parseInt(interaction.fields.getTextInputValue('giveaway_winners'));
 
-      const row = new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder().setCustomId(`confirm_buy_${resource}_${cost}_${desiredResourceAmount}`).setLabel('Confirm').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId('cancel_buy').setLabel('Cancel').setStyle(ButtonStyle.Danger),
-        );
+    // Extract pingRole from customId
+    const pingRoleId = interaction.customId.split('_')[3];
+    const pingRole = pingRoleId && pingRoleId !== 'none' ? interaction.guild.roles.cache.get(pingRoleId) : null;
 
-      await interaction.reply({
-        embeds: [confirmationEmbed],
-        components: [row],
-        flags: [MessageFlags.Ephemeral],
+    if (isNaN(totalPrize) || totalPrize <= 0) {
+      return interaction.reply({ content: '⚠️ Please provide a valid total prize amount.', flags: [MessageFlags.Ephemeral] });
+    }
+
+    if (isNaN(entryCost) || entryCost <= 0) {
+      return interaction.reply({ content: '⚠️ Please provide a valid entry cost.', flags: [MessageFlags.Ephemeral] });
+    }
+
+    if (isNaN(winnerCount) || winnerCount <= 0) {
+      return interaction.reply({ content: '⚠️ Please provide a valid number of winners.', flags: [MessageFlags.Ephemeral] });
+    }
+
+    const duration = parseDuration(durationStr);
+    if (!duration) {
+      return interaction.reply({ content: '⚠️ Please provide a valid duration (e.g., 1h, 30m, 2d).', flags: [MessageFlags.Ephemeral] });
+    }
+
+    const endTime = Date.now() + duration;
+    const giveawayId = `giveaway_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Calculate prize per winner
+    const prizePerWinner = Math.floor(totalPrize / winnerCount);
+
+    // Ensure server_stats record exists
+    await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
+
+    // Check if server pool has enough funds
+    const result = await db.query('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
+    if (!result || !result.rows || result.rows.length === 0) {
+      return interaction.reply({
+        content: '❌ Error: Could not access server pool. Please try again.',
+        flags: [MessageFlags.Ephemeral]
       });
-    } else if (interaction.customId.startsWith('giveaway_modal_')) {
-      const durationStr = interaction.fields.getTextInputValue('giveaway_duration');
-      const totalPrize = parseFloat(interaction.fields.getTextInputValue('giveaway_total_prize'));
-      const entryCost = parseFloat(interaction.fields.getTextInputValue('giveaway_entry_cost'));
-      const winnerCount = parseInt(interaction.fields.getTextInputValue('giveaway_winners'));
+    }
 
-      // Extract pingRole from customId
-      const pingRoleId = interaction.customId.split('_')[3];
-      const pingRole = pingRoleId && pingRoleId !== 'none' ? interaction.guild.roles.cache.get(pingRoleId) : null;
+    const poolBalance = result.rows[0]?.pool_balance || 0;
 
-      if (isNaN(totalPrize) || totalPrize <= 0) {
-        return interaction.reply({ content: '⚠️ Please provide a valid total prize amount.', flags: [MessageFlags.Ephemeral] });
-      }
-
-      if (isNaN(entryCost) || entryCost <= 0) {
-        return interaction.reply({ content: '⚠️ Please provide a valid entry cost.', flags: [MessageFlags.Ephemeral] });
-      }
-
-      if (isNaN(winnerCount) || winnerCount <= 0) {
-        return interaction.reply({ content: '⚠️ Please provide a valid number of winners.', flags: [MessageFlags.Ephemeral] });
-      }
-
-      const duration = parseDuration(durationStr);
-      if (!duration) {
-        return interaction.reply({ content: '⚠️ Please provide a valid duration (e.g., 1h, 30m, 2d).', flags: [MessageFlags.Ephemeral] });
-      }
-
-      const endTime = Date.now() + duration;
-      const giveawayId = `giveaway_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-      // Calculate prize per winner
-      const prizePerWinner = Math.floor(totalPrize / winnerCount);
-
-      // Ensure server_stats record exists
-      await db.query('INSERT INTO server_stats (id, pool_balance) VALUES ($1, 100000) ON CONFLICT (id) DO NOTHING', [interaction.guildId]);
-
-      // Check if server pool has enough funds
-      const result = await db.query('SELECT pool_balance FROM server_stats WHERE id = $1', [interaction.guildId]);
-      if (!result || !result.rows || result.rows.length === 0) {
-        return interaction.reply({
-          content: '❌ Error: Could not access server pool. Please try again.',
-          flags: [MessageFlags.Ephemeral]
-        });
-      }
-
-      const poolBalance = result.rows[0]?.pool_balance || 0;
-
-      if (poolBalance < totalPrize) {
-        return interaction.reply({
-          content: `❌ Not enough funds in server pool! Need **${totalPrize.toLocaleString('en-US')}** 💰 but pool only has **${poolBalance.toLocaleString('en-US')}** 💰.`,
-          flags: [MessageFlags.Ephemeral]
-        });
-      }
-
-      await db.query('UPDATE server_stats SET pool_balance = pool_balance - $1 WHERE id = $2', [totalPrize, interaction.guildId]);
-
-      // Create giveaway embed
-      const giveawayEmbed = new EmbedBuilder()
-        .setTitle(`🎁 **GIVEAWAY** 🎁`)
-        .setDescription(`🎉 **Prize:** ${totalPrize.toLocaleString('en-US')} 💰\n` +
-          `🎉 **Winners:** ${winnerCount}\n` +
-          `⏱️ **Ends:** <t:${Math.floor(endTime / 1000)}:R>\n` +
-          `💸 **Entry Cost:** ${entryCost.toLocaleString('en-US')} 💰\n` +
-          `\nClick the button below to join!`)
-        .setColor('Purple')
-        .setFooter({ text: `Hosted by ${interaction.user.tag}` });
-
-      const joinButton = new ButtonBuilder()
-        .setCustomId(`join_giveaway_${giveawayId}`)
-        .setLabel(`Join (${entryCost.toLocaleString('en-US')} SE)`)
-        .setStyle(ButtonStyle.Success)
-        .setEmoji('🎁');
-
-      const row = new ActionRowBuilder().addComponents(joinButton);
-
-      // Prepare content with ping if role is specified
-      const content = pingRole ? `${pingRole} **New Giveaway Available!** 🎉` : undefined;
-      const allowedMentions = pingRole ? { roles: [pingRole.id] } : undefined;
-
-      // Send the giveaway message
-      const giveawayMessage = await interaction.reply({
-        content: content,
-        embeds: [giveawayEmbed],
-        components: [row],
-        allowedMentions: allowedMentions
+    if (poolBalance < totalPrize) {
+      return interaction.reply({
+        content: `❌ Not enough funds in server pool! Need **${totalPrize.toLocaleString('en-US')}** 💰 but pool only has **${poolBalance.toLocaleString('en-US')}** 💰.`,
+        flags: [MessageFlags.Ephemeral]
       });
+    }
 
-      // Get the reply message for database storage
-      const replyMessage = await interaction.fetchReply();
+    await db.query('UPDATE server_stats SET pool_balance = pool_balance - $1 WHERE id = $2', [totalPrize, interaction.guildId]);
 
-      // Store giveaway in database
-      await db.query(`
+    // Create giveaway embed
+    const giveawayEmbed = new EmbedBuilder()
+      .setTitle(`🎁 **GIVEAWAY** 🎁`)
+      .setDescription(`🎉 **Prize:** ${totalPrize.toLocaleString('en-US')} 💰\n` +
+        `🎉 **Winners:** ${winnerCount}\n` +
+        `⏱️ **Ends:** <t:${Math.floor(endTime / 1000)}:R>\n` +
+        `💸 **Entry Cost:** ${entryCost.toLocaleString('en-US')} 💰\n` +
+        `\nClick the button below to join!`)
+      .setColor('Purple')
+      .setFooter({ text: `Hosted by ${interaction.user.tag}` });
+
+    const joinButton = new ButtonBuilder()
+      .setCustomId(`join_giveaway_${giveawayId}`)
+      .setLabel(`Join (${entryCost.toLocaleString('en-US')} SE)`)
+      .setStyle(ButtonStyle.Success)
+      .setEmoji('🎁');
+
+    const row = new ActionRowBuilder().addComponents(joinButton);
+
+    // Prepare content with ping if role is specified
+    const content = pingRole ? `${pingRole} **New Giveaway Available!** 🎉` : undefined;
+    const allowedMentions = pingRole ? { roles: [pingRole.id] } : undefined;
+
+    // Send the giveaway message
+    const giveawayMessage = await interaction.reply({
+      content: content,
+      embeds: [giveawayEmbed],
+      components: [row],
+      allowedMentions: allowedMentions
+    });
+
+    // Get the reply message for database storage
+    const replyMessage = await interaction.fetchReply();
+
+    // Store giveaway in database
+    await db.query(`
         INSERT INTO giveaways (id, guild_id, channel_id, message_id, entry_cost, total_prize, winner_count, end_time, creator_id, participants, required_role_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       `, [giveawayId, interaction.guildId, interaction.channelId, replyMessage.id, entryCost, totalPrize, winnerCount, new Date(endTime), interaction.user.id, [], null]);
 
-      // Set timeout to end giveaway
-      setTimeout(async () => {
-        await endGiveaway(giveawayId);
-      }, duration);
+    // Set timeout to end giveaway
+    setTimeout(async () => {
+      await endGiveaway(giveawayId);
+    }, duration);
 
-      logActivity('🎁 Giveaway Created', `<@${interaction.user.id}> created a giveaway: **${totalPrize.toLocaleString('en-US')} 💰** total prize (${entryCost.toLocaleString('en-US')} 💰 entry, ${winnerCount} winner(s))`, 'Gold');
+    logActivity('🎁 Giveaway Created', `<@${interaction.user.id}> created a giveaway: **${totalPrize.toLocaleString('en-US')} 💰** total prize (${entryCost.toLocaleString('en-US')} 💰 entry, ${winnerCount} winner(s))`, 'Gold');
+  }
+} else if (interaction.isStringSelectMenu()) {
+  if (interaction.customId === 'ticket_select') {
+    const categoryId = interaction.values[0];
+
+    // Fetch category details
+    const { rows: cats } = await db.query('SELECT * FROM ticket_categories WHERE id = $1', [categoryId]);
+    if (cats.length === 0) {
+      return await interaction.reply({ content: '❌ Category not found.', ephemeral: true });
     }
-  } else if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'ticket_select') {
-      const categoryId = interaction.values[0];
+    const category = cats[0];
 
-      // Fetch category details
-      const { rows: cats } = await db.query('SELECT * FROM ticket_categories WHERE id = $1', [categoryId]);
-      if (cats.length === 0) {
-        return await interaction.reply({ content: '❌ Category not found.', ephemeral: true });
-      }
-      const category = cats[0];
+    // Check if category has form questions
+    if (category.form_questions && category.form_questions.length > 0) {
+      const modal = new ModalBuilder()
+        .setCustomId(`modal_ticket_create_${category.id}`)
+        .setTitle(`${category.name} - Info`);
 
-      // Check if category has form questions
-      if (category.form_questions && category.form_questions.length > 0) {
-        const modal = new ModalBuilder()
-          .setCustomId(`modal_ticket_create_${category.id}`)
-          .setTitle(`${category.name} - Info`);
+      category.form_questions.slice(0, 5).forEach((q, index) => {
+        modal.addComponents(new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId(`q_${index}`).setLabel(q.substring(0, 45)).setStyle(TextInputStyle.Paragraph).setRequired(true)
+        ));
+      });
 
-        category.form_questions.slice(0, 5).forEach((q, index) => {
-          modal.addComponents(new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId(`q_${index}`).setLabel(q.substring(0, 45)).setStyle(TextInputStyle.Paragraph).setRequired(true)
-          ));
-        });
+      await interaction.showModal(modal);
+      return;
+    }
 
-        await interaction.showModal(modal);
-        return;
-      }
+    // If no questions, proceed with standard ticket creation
+    await interaction.deferReply({ ephemeral: true });
 
-      // If no questions, proceed with standard ticket creation
-      await interaction.deferReply({ ephemeral: true });
+    const guild = interaction.guild;
+    const channelName = `ticket-${interaction.user.username}-${category.name}`;
 
-      const guild = interaction.guild;
-      const channelName = `ticket-${interaction.user.username}-${category.name}`;
+    try {
+      // Create a private thread in the current channel
+      const ticketThread = await interaction.channel.threads.create({
+        name: channelName,
+        type: ChannelType.PrivateThread,
+        reason: `Ticket created by ${interaction.user.tag}`,
+        autoArchiveDuration: 1440, // 24 hours
+      });
 
-      try {
-        // Create a private thread in the current channel
-        const ticketThread = await interaction.channel.threads.create({
-          name: channelName,
-          type: ChannelType.PrivateThread,
-          reason: `Ticket created by ${interaction.user.tag}`,
-          autoArchiveDuration: 1440, // 24 hours
-        });
+      // Add user and staff to thread
+      await ticketThread.members.add(interaction.user.id);
 
-        // Add user and staff to thread
-        await ticketThread.members.add(interaction.user.id);
+      // Save to DB
+      await db.query(
+        'INSERT INTO tickets (channel_id, guild_id, user_id, category_id) VALUES ($1, $2, $3, $4)',
+        [ticketThread.id, guild.id, interaction.user.id, category.id]
+      );
 
-        // Save to DB
-        await db.query(
-          'INSERT INTO tickets (channel_id, guild_id, user_id, category_id) VALUES ($1, $2, $3, $4)',
-          [ticketThread.id, guild.id, interaction.user.id, category.id]
+      const welcomeEmbed = new EmbedBuilder()
+        .setTitle(`${category.emoji} ${category.name} Ticket`)
+        .setDescription(`Welcome <@${interaction.user.id}>!\nPlease describe your issue here. <@&${category.staff_role_id}> will be with you shortly.`)
+        .setColor('Green');
+
+      const closeButton = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId('close_ticket_btn')
+            .setLabel('Close Ticket')
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji('🔒')
         );
 
-        const welcomeEmbed = new EmbedBuilder()
-          .setTitle(`${category.emoji} ${category.name} Ticket`)
-          .setDescription(`Welcome <@${interaction.user.id}>!\nPlease describe your issue here. <@&${category.staff_role_id}> will be with you shortly.`)
-          .setColor('Green');
+      await ticketThread.send({ embeds: [welcomeEmbed], components: [closeButton] });
 
-        const closeButton = new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder()
-              .setCustomId('close_ticket_btn')
-              .setLabel('Close Ticket')
-              .setStyle(ButtonStyle.Danger)
-              .setEmoji('🔒')
-          );
+      await interaction.editReply({ content: `✅ Ticket created: <#${ticketThread.id}>` });
 
-        await ticketThread.send({ embeds: [welcomeEmbed], components: [closeButton] });
-
-        await interaction.editReply({ content: `✅ Ticket created: <#${ticketThread.id}>` });
-
-      } catch (err) {
-        console.error('Error creating ticket thread:', err);
-        await interaction.editReply({ content: '❌ Failed to create ticket thread. Ensure the bot has "Create Private Threads" and "Manage Threads" permissions or that the channel allows threads.' });
-      }
-    }
-  } else if (interaction.isButton()) { // Handle Button Clicks
-    if (interaction.customId === 'wizard_create_cat_btn') {
-      const modal = new ModalBuilder().setCustomId('modal_wizard_cat').setTitle('Create Ticket Category');
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_name').setLabel('Category Name').setStyle(TextInputStyle.Short).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_emoji').setLabel('Emoji').setStyle(TextInputStyle.Short).setPlaceholder('🎫').setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_role_id').setLabel('Staff Role ID').setStyle(TextInputStyle.Short).setPlaceholder('1234567890').setRequired(true))
-      );
-      await interaction.showModal(modal);
-      return;
-    } else if (interaction.customId.startsWith('wizard_add_single_q_')) {
-      const catId = interaction.customId.split('_')[4];
-      console.log('[Wizard Debug] Button Add Question. CustomID:', interaction.customId, 'CatID:', catId);
-      const modal = new ModalBuilder().setCustomId(`modal_wizard_single_q_${catId}`).setTitle('Add Question');
-
-      modal.addComponents(new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('question')
-          .setLabel('Question Text')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-      ));
-
-      await interaction.showModal(modal);
-      return;
-    } else if (interaction.customId.startsWith('wizard_finish_')) {
-      await interaction.reply({ content: '✅ Setup finished! The category has been configured.', ephemeral: true });
-      try { await interaction.channel.setArchived(true); } catch (e) { }
-      return;
-    }
-
-    if (interaction.customId === 'close_ticket_btn') {
-      await interaction.reply({ content: '🔒 Closing ticket...' });
-
-      // Update DB
-      await db.query('UPDATE tickets SET closed = TRUE WHERE channel_id = $1', [interaction.channelId]);
-
-      // Delete thread after 5 seconds
-      setTimeout(async () => {
-        try {
-          await interaction.channel.delete();
-        } catch (err) {
-          console.error('Failed to delete ticket thread:', err);
-        }
-      }, 5000);
-      return;
-    }
-    if (interaction.customId.startsWith('buy_') && ['buy_gold', 'buy_wood', 'buy_food', 'buy_stone'].includes(interaction.customId)) {
-      // Handle shop buy buttons - show modal
-      const resource = interaction.customId.split('_')[1];
-
-      const modal = new ModalBuilder()
-        .setCustomId(`buy_modal_${resource}`)
-        .setTitle(`Buy ${resource.charAt(0).toUpperCase() + resource.slice(1)}`);
-
-      const quantityInput = new TextInputBuilder()
-        .setCustomId('hp_quantity_input')
-        .setLabel("How many HP do you want to spend?")
-        .setPlaceholder('e.g., 10, 5.5, 100k, 1.5m')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const actionRow = new ActionRowBuilder().addComponents(quantityInput);
-      modal.addComponents(actionRow);
-
-      await interaction.showModal(modal);
-    } else if (interaction.customId.startsWith('join_giveaway_')) {
-      await interaction.deferReply({ flags: [MessageFlags.Ephemeral] }); // Don't delete the message
-    } else {
-      await interaction.deferUpdate(); // Acknowledge the button click immediately
-    }
-    if (interaction.customId.startsWith('confirm_buy_')) {
-      const [, , resource, costStr, resourceAmountStr] = interaction.customId.split('_');
-      const cost = parseFloat(costStr);
-      const resourceAmount = parseInt(resourceAmountStr, 10);
-
-      const { rows: userRows } = await db.query('SELECT balance FROM users WHERE id = $1', [interaction.user.id]);
-      if ((userRows[0]?.balance || 0) < cost) {
-        return interaction.editReply({ content: `❌ Oops! You no longer have enough Sovereign Pounds.`, embeds: [], components: [] });
-      }
-      await db.query(`UPDATE users SET balance = balance - $1, ${resource} = ${resource} + $2 WHERE id = $3`, [cost, resourceAmount, interaction.user.id]);
-      await db.query('UPDATE server_stats SET pool_balance = pool_balance + $1 WHERE id = $2', [cost, interaction.guildId]);
-      await interaction.editReply({ content: `✅ Success! You spent **${cost.toLocaleString('en-US')}** 💰 and received **${resourceAmount.toLocaleString('en-US')} ${resource}**!`, embeds: [], components: [] });
-      logActivity('🛒 Shop Purchase', `<@${interaction.user.id}> bought **${resourceAmount.toLocaleString('en-US')} ${resource}** for **${cost.toLocaleString('en-US')}** Sovereign Pounds.`, 'Blue')
-        .then(() => logPurchaseToSheet(interaction.user.username, resource, resourceAmount, cost));
-    } else if (interaction.customId === 'cancel_buy') {
-      await interaction.editReply({ content: 'Purchase canceled.', embeds: [], components: [] });
-    } else if (interaction.customId.startsWith('join_giveaway_')) {
-      const giveawayId = interaction.customId.replace('join_giveaway_', '');
-
-      try {
-        // Get giveaway info
-        const { rows } = await db.query('SELECT * FROM giveaways WHERE id = $1', [giveawayId]);
-        if (rows.length === 0) {
-          return interaction.editReply({ content: '❌ Giveaway not found or has ended.' });
-        }
-
-        const giveaway = rows[0];
-
-        // Check if giveaway has ended
-        if (new Date() > new Date(giveaway.end_time)) {
-          return interaction.editReply({ content: '❌ This giveaway has already ended.' });
-        }
-
-
-        // Check if user already joined
-        const participants = giveaway.participants || [];
-        if (participants.includes(interaction.user.id)) {
-          return interaction.editReply({ content: '❌ You have already joined this giveaway!' });
-        }
-
-        // Check if user has enough balance
-        const { rows: userRows } = await db.query('SELECT balance FROM users WHERE id = $1', [interaction.user.id]);
-        const userBalance = userRows[0]?.balance || 0;
-
-        if (userBalance < giveaway.entry_cost) {
-          return interaction.editReply({
-            content: `❌ You need **${giveaway.entry_cost.toLocaleString('en-US')}** 💰 to join this giveaway. You only have **${userBalance.toLocaleString('en-US')}** 💰.`
-          });
-        }
-
-        // Check if user has excluded roles
-        const userRoleIds = interaction.member.roles.cache.map(role => role.id);
-        const hasExcludedRole = userRoleIds.some(roleId => EXCLUDED_GIVEAWAY_ROLES.includes(roleId));
-
-        if (hasExcludedRole) {
-          return interaction.editReply({
-            content: `❌ You cannot join this giveaway due to your current roles. Please contact an administrator if you believe this is an error.`
-          });
-        }
-
-        // Deduct entry cost from user and add to pool
-        await db.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [giveaway.entry_cost, interaction.user.id]);
-        await db.query('UPDATE server_stats SET pool_balance = pool_balance + $1 WHERE id = $2', [giveaway.entry_cost, interaction.guildId]);
-
-
-        // Add user to participants
-        participants.push(interaction.user.id);
-        await db.query('UPDATE giveaways SET participants = $1 WHERE id = $2', [participants, giveawayId]);
-
-        // Update the giveaway embed to show new participant count
-        await updateGiveawayEmbed(giveawayId, participants.length);
-
-        await interaction.editReply({
-          content: `✅ You have successfully joined the giveaway! **${giveaway.entry_cost.toLocaleString('en-US')}** 💰 entry cost deducted from your balance.`
-        });
-
-        logActivity('🎁 Giveaway Joined', `<@${interaction.user.id}> joined giveaway`, 'Blue');
-      } catch (error) {
-        console.error('Error joining giveaway:', error);
-        await interaction.editReply({ content: '❌ An error occurred.' });
-      }
+    } catch (err) {
+      console.error('Error creating ticket thread:', err);
+      await interaction.editReply({ content: '❌ Failed to create ticket thread. Ensure the bot has "Create Private Threads" and "Manage Threads" permissions or that the channel allows threads.' });
     }
   }
+} else if (interaction.isButton()) { // Handle Button Clicks
+  if (interaction.customId === 'wizard_create_cat_btn') {
+    const modal = new ModalBuilder().setCustomId('modal_wizard_cat').setTitle('Create Ticket Category');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_name').setLabel('Category Name').setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_emoji').setLabel('Emoji').setStyle(TextInputStyle.Short).setPlaceholder('🎫').setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_role_id').setLabel('Staff Role ID').setStyle(TextInputStyle.Short).setPlaceholder('1234567890').setRequired(true))
+    );
+    await interaction.showModal(modal);
+    return;
+  } else if (interaction.customId.startsWith('wizard_add_single_q_')) {
+    const catId = interaction.customId.split('_')[4];
+    console.log('[Wizard Debug] Button Add Question. CustomID:', interaction.customId, 'CatID:', catId);
+    const modal = new ModalBuilder().setCustomId(`modal_wizard_single_q_${catId}`).setTitle('Add Question');
+
+    modal.addComponents(new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('question')
+        .setLabel('Question Text')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+    ));
+
+    await interaction.showModal(modal);
+    return;
+  } else if (interaction.customId.startsWith('wizard_finish_')) {
+    await interaction.reply({ content: '✅ Setup finished! The category has been configured.', ephemeral: true });
+    try { await interaction.channel.setArchived(true); } catch (e) { }
+    return;
+  }
+
+  if (interaction.customId === 'close_ticket_btn') {
+    await interaction.reply({ content: '🔒 Closing ticket...' });
+
+    // Update DB
+    await db.query('UPDATE tickets SET closed = TRUE WHERE channel_id = $1', [interaction.channelId]);
+
+    // Delete thread after 5 seconds
+    setTimeout(async () => {
+      try {
+        await interaction.channel.delete();
+      } catch (err) {
+        console.error('Failed to delete ticket thread:', err);
+      }
+    }, 5000);
+    return;
+  }
+  if (interaction.customId.startsWith('buy_') && ['buy_gold', 'buy_wood', 'buy_food', 'buy_stone'].includes(interaction.customId)) {
+    // Handle shop buy buttons - show modal
+    const resource = interaction.customId.split('_')[1];
+
+    const modal = new ModalBuilder()
+      .setCustomId(`buy_modal_${resource}`)
+      .setTitle(`Buy ${resource.charAt(0).toUpperCase() + resource.slice(1)}`);
+
+    const quantityInput = new TextInputBuilder()
+      .setCustomId('hp_quantity_input')
+      .setLabel("How many HP do you want to spend?")
+      .setPlaceholder('e.g., 10, 5.5, 100k, 1.5m')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    const actionRow = new ActionRowBuilder().addComponents(quantityInput);
+    modal.addComponents(actionRow);
+
+    await interaction.showModal(modal);
+  } else if (interaction.customId.startsWith('join_giveaway_')) {
+    await interaction.deferReply({ flags: [MessageFlags.Ephemeral] }); // Don't delete the message
+  } else {
+    await interaction.deferUpdate(); // Acknowledge the button click immediately
+  }
+  if (interaction.customId.startsWith('confirm_buy_')) {
+    const [, , resource, costStr, resourceAmountStr] = interaction.customId.split('_');
+    const cost = parseFloat(costStr);
+    const resourceAmount = parseInt(resourceAmountStr, 10);
+
+    const { rows: userRows } = await db.query('SELECT balance FROM users WHERE id = $1', [interaction.user.id]);
+    if ((userRows[0]?.balance || 0) < cost) {
+      return interaction.editReply({ content: `❌ Oops! You no longer have enough Sovereign Pounds.`, embeds: [], components: [] });
+    }
+    await db.query(`UPDATE users SET balance = balance - $1, ${resource} = ${resource} + $2 WHERE id = $3`, [cost, resourceAmount, interaction.user.id]);
+    await db.query('UPDATE server_stats SET pool_balance = pool_balance + $1 WHERE id = $2', [cost, interaction.guildId]);
+    await interaction.editReply({ content: `✅ Success! You spent **${cost.toLocaleString('en-US')}** 💰 and received **${resourceAmount.toLocaleString('en-US')} ${resource}**!`, embeds: [], components: [] });
+    logActivity('🛒 Shop Purchase', `<@${interaction.user.id}> bought **${resourceAmount.toLocaleString('en-US')} ${resource}** for **${cost.toLocaleString('en-US')}** Sovereign Pounds.`, 'Blue')
+      .then(() => logPurchaseToSheet(interaction.user.username, resource, resourceAmount, cost));
+  } else if (interaction.customId === 'cancel_buy') {
+    await interaction.editReply({ content: 'Purchase canceled.', embeds: [], components: [] });
+  } else if (interaction.customId.startsWith('join_giveaway_')) {
+    const giveawayId = interaction.customId.replace('join_giveaway_', '');
+
+    try {
+      // Get giveaway info
+      const { rows } = await db.query('SELECT * FROM giveaways WHERE id = $1', [giveawayId]);
+      if (rows.length === 0) {
+        return interaction.editReply({ content: '❌ Giveaway not found or has ended.' });
+      }
+
+      const giveaway = rows[0];
+
+      // Check if giveaway has ended
+      if (new Date() > new Date(giveaway.end_time)) {
+        return interaction.editReply({ content: '❌ This giveaway has already ended.' });
+      }
+
+
+      // Check if user already joined
+      const participants = giveaway.participants || [];
+      if (participants.includes(interaction.user.id)) {
+        return interaction.editReply({ content: '❌ You have already joined this giveaway!' });
+      }
+
+      // Check if user has enough balance
+      const { rows: userRows } = await db.query('SELECT balance FROM users WHERE id = $1', [interaction.user.id]);
+      const userBalance = userRows[0]?.balance || 0;
+
+      if (userBalance < giveaway.entry_cost) {
+        return interaction.editReply({
+          content: `❌ You need **${giveaway.entry_cost.toLocaleString('en-US')}** 💰 to join this giveaway. You only have **${userBalance.toLocaleString('en-US')}** 💰.`
+        });
+      }
+
+      // Check if user has excluded roles
+      const userRoleIds = interaction.member.roles.cache.map(role => role.id);
+      const hasExcludedRole = userRoleIds.some(roleId => EXCLUDED_GIVEAWAY_ROLES.includes(roleId));
+
+      if (hasExcludedRole) {
+        return interaction.editReply({
+          content: `❌ You cannot join this giveaway due to your current roles. Please contact an administrator if you believe this is an error.`
+        });
+      }
+
+      // Deduct entry cost from user and add to pool
+      await db.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [giveaway.entry_cost, interaction.user.id]);
+      await db.query('UPDATE server_stats SET pool_balance = pool_balance + $1 WHERE id = $2', [giveaway.entry_cost, interaction.guildId]);
+
+
+      // Add user to participants
+      participants.push(interaction.user.id);
+      await db.query('UPDATE giveaways SET participants = $1 WHERE id = $2', [participants, giveawayId]);
+
+      // Update the giveaway embed to show new participant count
+      await updateGiveawayEmbed(giveawayId, participants.length);
+
+      await interaction.editReply({
+        content: `✅ You have successfully joined the giveaway! **${giveaway.entry_cost.toLocaleString('en-US')}** 💰 entry cost deducted from your balance.`
+      });
+
+      logActivity('🎁 Giveaway Joined', `<@${interaction.user.id}> joined giveaway`, 'Blue');
+    } catch (error) {
+      console.error('Error joining giveaway:', error);
+      await interaction.editReply({ content: '❌ An error occurred.' });
+    }
+  }
+}
 });
 
 // Web server to keep the bot alive on hosting platforms like Koyeb/Railway
