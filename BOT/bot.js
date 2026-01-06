@@ -1300,7 +1300,7 @@ client.on('interactionCreate', async interaction => {
             }
 
             const embed = new EmbedBuilder()
-              .setTitle(`Edit Questions: ${currentName} (v2)`)
+              .setTitle(`Edit Questions: ${currentName}`)
               .setDescription(`Current Questions:\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n') || 'None'}`)
               .setColor('Purple');
 
