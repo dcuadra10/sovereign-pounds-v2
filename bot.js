@@ -1798,6 +1798,41 @@ client.on('interactionCreate', async interaction => {
           interaction.reply({ content: 'Error opening form (Check console).', ephemeral: true });
         }
       }
+    } else if (interaction.customId.startsWith('wizard_delete_q_select_')) {
+      const catId = interaction.customId.split('_')[4];
+      const indexToDelete = parseInt(interaction.values[0]);
+
+      const { rows } = await safeQuery('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
+      if (rows.length === 0) return interaction.reply({ content: 'Category not found.', ephemeral: true });
+
+      let questions = [];
+      try {
+        const rawData = rows[0].form_questions;
+        if (Array.isArray(rawData)) {
+          questions = rawData;
+        } else if (rawData && typeof rawData === 'string' && rawData.trim().length > 0) {
+          questions = JSON.parse(rawData);
+        }
+      } catch (e) { questions = []; }
+
+      if (indexToDelete >= 0 && indexToDelete < questions.length) {
+        questions.splice(indexToDelete, 1);
+        await safeQuery('UPDATE ticket_categories SET form_questions = $1 WHERE id = $2', [JSON.stringify(questions), catId]);
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle(rows[0].name ? `Edit Questions: ${rows[0].name}` : 'Edit Questions')
+        .setDescription(`Current Questions:\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n') || 'None'}`)
+        .setColor('Purple');
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`wizard_add_single_q_${catId}`).setLabel('Add Question').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`wizard_delete_q_menu_${catId}`).setLabel('Delete Question').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`wizard_clear_q_${catId}`).setLabel('Clear All').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`wizard_finish_${catId}`).setLabel('Finish').setStyle(ButtonStyle.Success)
+      );
+
+      await interaction.update({ embeds: [embed], components: [row] });
     } else {
       console.log(`[Select Menu] Unknown Custom ID: '${interaction.customId}'`);
       if (!interaction.replied && !interaction.deferred) {
@@ -2066,115 +2101,6 @@ client.on('interactionCreate', async interaction => {
 
       logActivity('🎁 Giveaway Created', `<@${interaction.user.id}> created a giveaway: **${totalPrize.toLocaleString('en-US')} 💰** total prize (${entryCost.toLocaleString('en-US')} 💰 entry, ${winnerCount} winner(s))`, 'Gold');
     }
-  } else if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'ticket_select') {
-      const categoryId = interaction.values[0];
-
-      // Fetch category details
-      const { rows: cats } = await db.query('SELECT * FROM ticket_categories WHERE id = $1', [categoryId]);
-      if (cats.length === 0) {
-        return await interaction.reply({ content: '❌ Category not found.', ephemeral: true });
-      }
-      const category = cats[0];
-
-      // Check if category has form questions
-      if (category.form_questions && category.form_questions.length > 0) {
-        const modal = new ModalBuilder()
-          .setCustomId(`modal_ticket_create_${category.id}`)
-          .setTitle(`${category.name} - Info`);
-
-        category.form_questions.slice(0, 5).forEach((q, index) => {
-          modal.addComponents(new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId(`q_${index}`).setLabel(q.substring(0, 45)).setStyle(TextInputStyle.Paragraph).setRequired(true)
-          ));
-        });
-
-        await interaction.showModal(modal);
-        return;
-      }
-
-      // If no questions, proceed with standard ticket creation
-      await interaction.deferReply({ ephemeral: true });
-
-      const guild = interaction.guild;
-      const channelName = `ticket-${interaction.user.username}-${category.name}`;
-
-      try {
-        // Create a private thread in the current channel
-        const ticketThread = await interaction.channel.threads.create({
-          name: channelName,
-          type: ChannelType.PrivateThread,
-          reason: `Ticket created by ${interaction.user.tag}`,
-          autoArchiveDuration: 1440, // 24 hours
-        });
-
-        // Add user and staff to thread
-        await ticketThread.members.add(interaction.user.id);
-
-        // Save to DB
-        await db.query(
-          'INSERT INTO tickets (channel_id, guild_id, user_id, category_id) VALUES ($1, $2, $3, $4)',
-          [ticketThread.id, guild.id, interaction.user.id, category.id]
-        );
-
-        const welcomeEmbed = new EmbedBuilder()
-          .setTitle(`${category.emoji} ${category.name} Ticket`)
-          .setDescription(`Welcome <@${interaction.user.id}>!\nPlease describe your issue here. <@&${category.staff_role_id}> will be with you shortly.`)
-          .setColor('Green');
-
-        const closeButton = new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder()
-              .setCustomId('close_ticket_btn')
-              .setLabel('Close Ticket')
-              .setStyle(ButtonStyle.Danger)
-              .setEmoji('🔒')
-          );
-
-        await ticketThread.send({ embeds: [welcomeEmbed], components: [closeButton] });
-
-        await interaction.editReply({ content: `✅ Ticket created: <#${ticketThread.id}>` });
-
-      } catch (err) {
-        console.error('Error creating ticket thread:', err);
-        await interaction.editReply({ content: '❌ Failed to create ticket thread. Ensure the bot has "Create Private Threads" and "Manage Threads" permissions or that the channel allows threads.' });
-      }
-    } else if (interaction.customId.startsWith('wizard_delete_q_select_')) {
-      const catId = interaction.customId.split('_')[4];
-      const indexToDelete = parseInt(interaction.values[0]);
-
-      const { rows } = await db.query('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
-      if (rows.length === 0) return interaction.reply({ content: 'Category not found.', ephemeral: true });
-
-      let questions = [];
-      try {
-        const rawData = rows[0].form_questions;
-        if (Array.isArray(rawData)) {
-          questions = rawData;
-        } else if (rawData && typeof rawData === 'string' && rawData.trim().length > 0) {
-          questions = JSON.parse(rawData);
-        }
-      } catch (e) { questions = []; }
-
-      if (indexToDelete >= 0 && indexToDelete < questions.length) {
-        questions.splice(indexToDelete, 1);
-        await db.query('UPDATE ticket_categories SET form_questions = $1 WHERE id = $2', [JSON.stringify(questions), catId]);
-      }
-
-      const embed = new EmbedBuilder()
-        .setTitle(rows[0].name ? `Edit Questions: ${rows[0].name}` : 'Edit Questions')
-        .setDescription(`Current Questions:\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n') || 'None'}`)
-        .setColor('Purple');
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`wizard_add_single_q_${catId}`).setLabel('Add Question').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`wizard_delete_q_menu_${catId}`).setLabel('Delete Question').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId(`wizard_clear_q_${catId}`).setLabel('Clear All').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(`wizard_finish_${catId}`).setLabel('Finish').setStyle(ButtonStyle.Success)
-      );
-
-      await interaction.update({ embeds: [embed], components: [row] });
-    }
   } else if (interaction.isButton()) { // Handle Button Clicks
     if (interaction.customId === 'wizard_create_cat_btn') {
       const modal = new ModalBuilder().setCustomId('modal_wizard_cat').setTitle('Create Ticket Category');
@@ -2202,7 +2128,7 @@ client.on('interactionCreate', async interaction => {
       return;
     } else if (interaction.customId.startsWith('wizard_finish_')) {
       await interaction.reply({ content: '✅ Setup finished! The category has been configured.', ephemeral: true });
-      try { await interaction.channel.setArchived(true); } catch (e) { }
+      try { await interaction.channel.delete(); } catch (e) { }
       return;
     } else if (interaction.customId.startsWith('wizard_delete_q_menu_')) {
       const catId = interaction.customId.split('_')[4];
