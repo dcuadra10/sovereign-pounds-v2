@@ -539,6 +539,79 @@ client.on('guildMemberAdd', async member => {
 
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
+
+  // --- Ticket Interview Logic ---
+  if (message.channel.isThread()) {
+    const { rows } = await safeQuery('SELECT * FROM tickets WHERE channel_id = $1 AND closed = FALSE', [message.channelId]);
+    if (rows.length > 0) {
+      const ticket = rows[0];
+      let pendingQs = [];
+      try {
+        if (ticket.pending_questions) {
+          pendingQs = typeof ticket.pending_questions === 'string' ? JSON.parse(ticket.pending_questions) : ticket.pending_questions;
+        }
+      } catch (e) { }
+
+      if (pendingQs && Array.isArray(pendingQs) && pendingQs.length > 0) {
+        const currentIndex = ticket.current_question_index || 0;
+
+        if (currentIndex < pendingQs.length) {
+          // This message IS the answer to questions[currentIndex]
+          let answers = [];
+          try {
+            if (ticket.answers) {
+              answers = typeof ticket.answers === 'string' ? JSON.parse(ticket.answers) : ticket.answers;
+            }
+          } catch (e) { }
+
+          const currentQ = pendingQs[currentIndex];
+          answers.push({ question: currentQ, answer: message.content });
+
+          const nextIndex = currentIndex + 1;
+
+          await safeQuery('UPDATE tickets SET answers = $1, current_question_index = $2 WHERE channel_id = $3', [JSON.stringify(answers), nextIndex, message.channelId]);
+
+          // Proceed to next step
+          if (nextIndex < pendingQs.length) {
+            // Ask next question
+            const nextQ = pendingQs[nextIndex];
+            const embed = new EmbedBuilder()
+              .setTitle(`Question ${nextIndex + 1}/${pendingQs.length}`)
+              .setDescription(nextQ)
+              .setColor('Blue');
+            await message.channel.send({ embeds: [embed] });
+          } else {
+            // Finished!
+            // Clear pending questions to mark interview as done
+            await safeQuery('UPDATE tickets SET pending_questions = NULL WHERE channel_id = $1', [message.channelId]);
+
+            // Generate Final Report
+            const formattedAnswers = answers.map((a, i) => `**${i + 1}. ${a.question}**\n${a.answer}`).join('\n\n');
+
+            // Fetch category info to ping role
+            const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE id = $1', [ticket.category_id]);
+            const category = catRows[0];
+            const rolePing = category ? `<@&${category.staff_role_id}>` : '';
+
+            const embed = new EmbedBuilder()
+              .setTitle('✅ Application Completed')
+              .setDescription(`**Applicant:** <@${message.author.id}>\n\n${formattedAnswers}`)
+              .setColor('Green')
+              .setFooter({ text: 'Interview Complete' });
+
+            const closeButton = new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('close_ticket_btn').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
+            );
+
+            await message.channel.send({ content: `${rolePing} <@${message.author.id}> has completed the application!`, embeds: [embed], components: [closeButton] });
+          }
+          // Return early so we don't spam XP messages inside the interview, but optionally we can allow XP.
+          // Let's allow XP generation as normal.
+        }
+      }
+    }
+  }
+
   await db.query('INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [message.author.id]);
 
   // Increment total message count
@@ -1771,6 +1844,58 @@ client.on('interactionCreate', async interaction => {
         if (parsedQs.length === 0) parsedQs = ['Please describe your request:'];
 
         console.log(`[Ticket Select] Questions to ask: ${parsedQs.length}`);
+
+        if (parsedQs.length > 5) {
+          // Interview Mode
+          await interaction.deferReply({ ephemeral: true });
+
+          const guild = interaction.guild;
+          const safeName = interaction.user.username.replace(/[^a-zA-Z0-9-]/g, '');
+          const channelName = `ticket-${safeName}-${category.name}`.substring(0, 32);
+
+          try {
+            // Create Thread
+            const ticketThread = await interaction.channel.threads.create({
+              name: channelName,
+              type: ChannelType.PrivateThread,
+              reason: `Ticket created by ${interaction.user.tag}`,
+              autoArchiveDuration: 1440
+            });
+            await ticketThread.members.add(interaction.user.id);
+
+            // Insert into DB with pending_questions
+            await safeQuery(
+              'INSERT INTO tickets (channel_id, guild_id, user_id, category_id, pending_questions, current_question_index, answers) VALUES ($1, $2, $3, $4, $5, 0, $6)',
+              [ticketThread.id, guild.id, interaction.user.id, category.id, JSON.stringify(parsedQs), JSON.stringify([])]
+            );
+
+            const welcomeEmbed = new EmbedBuilder()
+              .setTitle(`${category.emoji} ${category.name} Ticket`)
+              .setDescription(`Welcome <@${interaction.user.id}>!\n\nThis application has **${parsedQs.length}** questions.\nPlease answer them one by one below.`)
+              .setColor('Green');
+
+            await ticketThread.send({ embeds: [welcomeEmbed] });
+
+            // Send First Question
+            const firstQ = parsedQs[0];
+            const qEmbed = new EmbedBuilder()
+              .setTitle(`Question 1/${parsedQs.length}`)
+              .setDescription(firstQ)
+              .setColor('Blue');
+
+            await ticketThread.send({ embeds: [qEmbed] });
+
+            await interaction.editReply({ content: `✅ Ticket created: <#${ticketThread.id}>` });
+
+            // Reset select menu
+            await interaction.message.edit({ components: interaction.message.components });
+
+          } catch (err) {
+            console.error('Error creating interview thread:', err);
+            await interaction.editReply({ content: '❌ Failed to create ticket thread.' });
+          }
+          return;
+        }
 
         const modal = new ModalBuilder()
           .setCustomId(`modal_ticket_create_${catId}`)

@@ -325,9 +325,21 @@ async function initializeDatabase() {
         user_id TEXT NOT NULL,
         category_id INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        closed BOOLEAN DEFAULT FALSE
+        closed BOOLEAN DEFAULT FALSE,
+        pending_questions ${isSqlite ? 'TEXT' : 'JSONB'},
+        current_question_index INTEGER DEFAULT 0,
+        answers ${isSqlite ? 'TEXT' : 'JSONB'}
       )
     `);
+
+    // Migration: Add pending_questions, current_question_index, answers columns to tickets
+    try {
+      await client.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS pending_questions ${isSqlite ? 'TEXT' : 'JSONB'}`);
+      await client.query('ALTER TABLE tickets ADD COLUMN IF NOT EXISTS current_question_index INTEGER DEFAULT 0');
+      await client.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS answers ${isSqlite ? 'TEXT' : 'JSONB'}`);
+    } catch (err) {
+      console.log('Safe migration: tickets interview columns check passed.', err.message);
+    }
 
     console.log('Database tables checked/created successfully.');
   } catch (err) {
