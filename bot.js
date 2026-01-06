@@ -1743,20 +1743,29 @@ if (interaction.isStringSelectMenu()) {
     }
   } else if (interaction.customId === 'ticket_select') {
     const catId = interaction.values[0];
+    console.log(`[Ticket Select] User ${interaction.user.tag} selected category ID: ${catId}`);
     try {
       const { rows } = await safeQuery('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
-      if (rows.length === 0) return interaction.reply({ content: 'Category not found.', ephemeral: true });
+      if (rows.length === 0) {
+        console.log('[Ticket Select] Category not found in DB.');
+        return interaction.reply({ content: 'Category not found.', ephemeral: true });
+      }
 
       const category = rows[0];
+      console.log(`[Ticket Select] Found category: ${category.name}`);
       let parsedQs = category.form_questions;
-      if (typeof parsedQs === 'string') try { parsedQs = JSON.parse(parsedQs); } catch (e) { }
+      if (typeof parsedQs === 'string') try { parsedQs = JSON.parse(parsedQs); } catch (e) {
+        console.error('[Ticket Select] Error parsing questions JSON:', e);
+      }
       if (!Array.isArray(parsedQs)) parsedQs = [];
 
       if (parsedQs.length === 0) parsedQs = ['Please describe your request:'];
 
+      console.log(`[Ticket Select] Questions to ask: ${parsedQs.length}`);
+
       const modal = new ModalBuilder()
         .setCustomId(`modal_ticket_create_${catId}`)
-        .setTitle(`Open Ticket: ${category.name}`);
+        .setTitle(`Open Ticket: ${category.name.substring(0, 45)}`);
 
       parsedQs.slice(0, 5).forEach((q, i) => {
         modal.addComponents(new ActionRowBuilder().addComponents(
@@ -1768,10 +1777,14 @@ if (interaction.isStringSelectMenu()) {
         ));
       });
 
+      console.log('[Ticket Select] Showing modal...');
       await interaction.showModal(modal);
+      console.log('[Ticket Select] Modal shown.');
     } catch (err) {
-      console.error(err);
-      interaction.reply({ content: 'Error opening form.', ephemeral: true });
+      console.error('[Ticket Select] Error opening form:', err);
+      if (!interaction.replied && !interaction.deferred) {
+        interaction.reply({ content: 'Error opening form (Check console).', ephemeral: true });
+      }
     }
   }
 } else if (interaction.isModalSubmit()) { // Handle Modal Submissions
