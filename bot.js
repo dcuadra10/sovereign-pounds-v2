@@ -2003,6 +2003,50 @@ client.on('interactionCreate', async interaction => {
       );
 
       await interaction.update({ embeds: [embed], components: [row] });
+    } else if (interaction.customId.startsWith('wizard_q_type_select_')) {
+      const catId = interaction.customId.split('_')[4];
+      const type = interaction.values[0];
+
+      if (type === 'text' || type === 'file') {
+        const modal = new ModalBuilder()
+          .setCustomId(`modal_wizard_add_q_${type}_${catId}`)
+          .setTitle(`Add ${type === 'text' ? 'Text' : 'File'} Question`);
+
+        modal.addComponents(new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('question_text')
+            .setLabel('Question Text')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+        ));
+
+        await interaction.showModal(modal);
+      } else if (type === 'dropdown') {
+        const modal = new ModalBuilder()
+          .setCustomId(`modal_wizard_add_q_${type}_${catId}`)
+          .setTitle('Add Dropdown Question');
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('question_text')
+              .setLabel('Question Text')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('dropdown_options')
+              .setLabel('Options (comma separated)')
+              .setPlaceholder('Option 1, Option 2, Option 3')
+              .setStyle(TextInputStyle.Paragraph)
+              .setRequired(true)
+          )
+        );
+        await interaction.showModal(modal);
+      }
+      // Clean up the selection message
+      try { await interaction.message.delete(); } catch (e) { }
     } else {
       console.log(`[Select Menu] Unknown Custom ID: '${interaction.customId}'`);
       if (!interaction.replied && !interaction.deferred) {
@@ -2573,50 +2617,7 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ content: 'Choose the type of answer for this question:', components: [row], ephemeral: true });
       return;
 
-    } else if (interaction.customId.startsWith('wizard_q_type_select_')) {
-      const catId = interaction.customId.split('_')[4];
-      const type = interaction.values[0];
 
-      if (type === 'text' || type === 'file') {
-        const modal = new ModalBuilder()
-          .setCustomId(`modal_wizard_add_q_${type}_${catId}`)
-          .setTitle(`Add ${type === 'text' ? 'Text' : 'File'} Question`);
-
-        modal.addComponents(new ActionRowBuilder().addComponents(
-          new TextInputBuilder()
-            .setCustomId('question_text')
-            .setLabel('Question Text')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-        ));
-
-        await interaction.showModal(modal);
-      } else if (type === 'dropdown') {
-        const modal = new ModalBuilder()
-          .setCustomId(`modal_wizard_add_q_${type}_${catId}`)
-          .setTitle('Add Dropdown Question');
-
-        modal.addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('question_text')
-              .setLabel('Question Text')
-              .setStyle(TextInputStyle.Short)
-              .setRequired(true)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('dropdown_options')
-              .setLabel('Options (comma separated)')
-              .setPlaceholder('Option 1, Option 2, Option 3')
-              .setStyle(TextInputStyle.Paragraph)
-              .setRequired(true)
-          )
-        );
-        await interaction.showModal(modal);
-      }
-      // Clean up the selection message
-      try { await interaction.message.delete(); } catch (e) { }
     } else if (interaction.customId.startsWith('wizard_finish_')) {
       await interaction.reply({ content: '✅ Setup finished! The category has been configured.', ephemeral: true });
       try { await interaction.channel.delete(); } catch (e) { }
