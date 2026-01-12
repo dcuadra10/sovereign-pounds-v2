@@ -298,6 +298,41 @@ async function initializeDatabase() {
 
     // Server Growth Tracking
 
+    // Global Guild Configuration (For "All in One" Public Bot)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS guild_configs (
+        guild_id TEXT PRIMARY KEY,
+        welcome_channel_id TEXT,
+        welcome_message TEXT,
+        welcome_image_url TEXT,
+        welcome_enabled BOOLEAN DEFAULT FALSE,
+        auto_role_id TEXT,
+        log_channel_id TEXT,
+        ticket_dashboard_channel_id TEXT
+      )
+    `);
+
+    // Ticket System Tables
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_levels (
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        xp BIGINT DEFAULT 0,
+        level INTEGER DEFAULT 0,
+        last_xp_time TIMESTAMP,
+        PRIMARY KEY (guild_id, user_id)
+      )
+    `);
+
+    // Leveling System: Role Rewards
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS level_rewards (
+        id ${isSqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'SERIAL PRIMARY KEY'},
+        guild_id TEXT NOT NULL,
+        level INTEGER NOT NULL,
+        role_id TEXT NOT NULL
+      )
+    `);
 
     // Ticket System Tables
     await client.query(`
@@ -363,6 +398,16 @@ async function initializeDatabase() {
       await client.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS answers ${isSqlite ? 'TEXT' : 'JSONB'}`);
     } catch (err) {
       console.log('Safe migration: tickets interview columns check passed.', err.message);
+    }
+    // Leveling System Migrations for guild_configs
+    try {
+      await client.query('ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS leveling_enabled BOOLEAN DEFAULT FALSE');
+      await client.query('ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS xp_rate_message REAL DEFAULT 20.0');
+      await client.query('ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS xp_rate_voice REAL DEFAULT 10.0');
+      await client.query('ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS level_up_channel_id TEXT');
+      console.log('Safe migration: Leveling columns check passed.');
+    } catch (err) {
+      console.log('Migration note (leveling):', err.message);
     }
 
     console.log('Database tables checked/created successfully.');

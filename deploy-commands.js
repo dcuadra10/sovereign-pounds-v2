@@ -203,7 +203,12 @@ const commands = [
       option.setName('name')
         .setDescription('Name for the emoji')
         .setRequired(true)
+        .setRequired(true)
     ),
+
+  new SlashCommandBuilder()
+    .setName('setup')
+    .setDescription('Admin: Open the ALL in One Configuration Wizard'),
 
 
 ].map(command => command.toJSON());

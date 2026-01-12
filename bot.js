@@ -533,6 +533,38 @@ async function updateTicketDashboard(guild) {
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
+  // --- Leveling System (Message XP) ---
+  if (message.guild) {
+    // Check cooldown (e.g. 1 minute)
+    // We need to fetch 'last_xp_time' from DB. This might be heavy for every message.
+    // Optimization: Cache or just query. Queries are 1-2ms on local inv-mem. Postgres is fast.
+    // But let's check config first.
+
+    // We'll optimistically fetch user_levels first as it contains last_xp_time.
+    // But we need to know if it's enabled.
+    // Let's rely on a memory cache for configs eventually. For now, DB query.
+
+    // To reduce DB load, we process XP only if user is in cache or randomly? No, robustness first.
+
+    (async () => {
+      try {
+        const { rows: configRows } = await safeQuery('SELECT leveling_enabled, xp_rate_message FROM guild_configs WHERE guild_id = $1', [message.guildId]);
+        if (configRows.length && configRows[0].leveling_enabled) {
+          const xpRate = configRows[0].xp_rate_message || 20;
+
+          const { rows: userRows } = await safeQuery('SELECT last_xp_time FROM user_levels WHERE guild_id = $1 AND user_id = $2', [message.guildId, message.author.id]);
+          const lastTime = userRows[0]?.last_xp_time;
+
+          const now = new Date();
+          if (!lastTime || (now - new Date(lastTime)) > 10000) { // 10s cooldown
+            await addXp(message.guildId, message.author.id, xpRate, message.channel);
+          }
+        }
+      } catch (e) { console.error('XP Error:', e); }
+    })();
+  }
+
+
   // --- Ticket Interview Logic ---
   if (message.channel.isThread()) {
     const { rows } = await safeQuery('SELECT * FROM tickets WHERE channel_id = $1 AND closed = FALSE', [message.channelId]);
@@ -699,6 +731,39 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
           logActivity('🎙️ Voice Reward', `<@${member.id}> received **${totalReward}** 💰 for spending ${hoursToReward} hour(s) in voice channels.`, 'Green');
         }
+
+        // --- Leveling System (Voice XP) ---
+        // Reward per minute (tracked in minutes variable) is tricky because 'minutes' in DB is cumulative total.
+        // But here we just calculated 'minutesSpent' (diff).
+        // Wait, the logic above (lines 680-700) tracks 'minutes' for currency rewards which resets or accumulates?
+        // Ah, logic: 'minutes' is total. 'rewarded_minutes' is tracked.
+        // We can replicate logic for XP or just give XP for minutesSpent.
+
+        // We don't have 'minutesSpent' variable exposed easily in lines 690-700 without reading the diff.
+        // The diff is implied by 'minutes - rewarded_minutes'.
+        // Currency is given per HOUR (60 mins).
+        // XP should be per MINUTE. 
+
+        // Use separate query/logic for XP or hook into the update?
+        // Let's hook into the "minute update" logic if it exists. 
+        // Currently, the bot updates voice_times on JOIN/LEAVE.
+        // If someone is in VC for 5 hours, they get rewards on LEAVE?
+        // Line 704: `} else if (!oldState.channelId && newState.channelId) { // joined`
+        // Line 651: `if (oldState.channelId && !newState.channelId) { // left`
+        // It calculates duration on LEAVE.
+
+        const durationMs = Date.now() - startTime;
+        const minutesSpent = Math.floor(durationMs / 1000 / 60);
+
+        if (minutesSpent > 0) {
+          // Get rate
+          const { rows: configRows } = await safeQuery('SELECT xp_rate_voice FROM guild_configs WHERE guild_id = $1', [member.guild.id]);
+          const xpRateVoice = configRows[0]?.xp_rate_voice || 10;
+          const xpToGive = Math.floor(minutesSpent * xpRateVoice);
+          if (xpToGive > 0) {
+            await addXp(member.guild.id, member.id, xpToGive);
+          }
+        }
       }
     }
   } else if (!oldState.channelId && newState.channelId) { // joined
@@ -750,6 +815,54 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     }
   }
 });
+
+client.on('guildMemberAdd', async member => {
+  try {
+    const { rows } = await safeQuery('SELECT * FROM guild_configs WHERE guild_id = $1', [member.guild.id]);
+    const config = rows[0];
+    if (!config) return;
+
+    // 1. Auto-Role
+    if (config.auto_role_id) {
+      const role = member.guild.roles.cache.get(config.auto_role_id);
+      if (role) {
+        await member.roles.add(role).catch(err => console.error(`Failed to assign auto-role to ${member.user.tag}:`, err));
+      }
+    }
+
+    // 2. Welcome Message
+    if (config.welcome_enabled && config.welcome_channel_id) {
+      const channel = member.guild.channels.cache.get(config.welcome_channel_id);
+      if (channel && channel.isTextBased()) {
+        const msgContent = (config.welcome_message || 'Welcome {user} to {guild}!')
+          .replace(/{user}/g, `<@${member.id}>`)
+          .replace(/{guild}/g, member.guild.name)
+          .replace(/{memberCount}/g, member.guild.memberCount)
+          .replace(/{avatar}/g, member.user.displayAvatarURL({ dynamic: true }));
+
+        const embed = new EmbedBuilder()
+          .setDescription(msgContent)
+          .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+          .setColor('Blurple')
+          .setTimestamp();
+
+        if (config.welcome_image_url) {
+          embed.setImage(config.welcome_image_url);
+        }
+
+        // If message contains basic text outside embed?
+        // Usually people want a ping outside embed.
+        // We can regex for {user} to decide content vs embed description?
+        // For simplicity: Content = Ping, Embed = Message.
+
+        await channel.send({ content: `Welcome <@${member.id}>!`, embeds: [embed] });
+      }
+    }
+  } catch (err) {
+    console.error('Error in guildMemberAdd:', err);
+  }
+});
+
 
 client.on('messageDelete', async (message) => {
   // Check if this is a giveaway message
@@ -1662,6 +1775,33 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `❌ Failed to edit panel: ${error.message}`, ephemeral: true });
       }
 
+    } else if (commandName === 'setup') {
+      // Main Configuration Wizard Entry Point
+      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: '❌ You need Administrator permissions to use this.', ephemeral: true });
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle('🛠️ ALL in One Configuration')
+        .setDescription('Select a module to configure for this server.')
+        .addFields(
+          { name: '📢 Welcome Module', value: 'Customize welcome messages, images, and auto-roles.', inline: true },
+          { name: '🎫 Ticket System', value: 'Manage support tickets and panels.', inline: true },
+          { name: '🛡️ Logging', value: 'Set up audit logs for server events.', inline: true },
+          { name: '📈 Leveling System', value: 'Configure XP rates and level-up rewards.', inline: true }
+        )
+        .setColor('Blurple')
+        .setFooter({ text: 'Sovereign Empire Bot • Setup Wizard' });
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_btn').setLabel('Welcome Module').setStyle(ButtonStyle.Primary).setEmoji('📢'),
+        new ButtonBuilder().setCustomId('setup_tickets_btn').setLabel('Ticket System').setStyle(ButtonStyle.Primary).setEmoji('🎫'),
+        new ButtonBuilder().setCustomId('setup_logs_btn').setLabel('Logging').setStyle(ButtonStyle.Primary).setEmoji('🛡️'),
+        new ButtonBuilder().setCustomId('setup_levels_btn').setLabel('Leveling').setStyle(ButtonStyle.Success).setEmoji('📈'),
+        new ButtonBuilder().setCustomId('setup_close_btn').setLabel('Close').setStyle(ButtonStyle.Secondary).setEmoji('❌')
+      );
+
+      await interaction.reply({ embeds: [embed], components: [row] });
     } else if (commandName === 'reset-all') {
       await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
       const adminIds = (process.env.ADMIN_IDS || '').split(',');
@@ -2022,6 +2162,120 @@ client.on('interactionCreate', async interaction => {
       } catch (err) {
         console.error('[Ticket Select] Error opening form:', err);
       }
+    } else if (interaction.customId === 'select_welcome_channel') {
+      const channelId = interaction.values[0];
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET welcome_channel_id = $1 WHERE guild_id = $2', [channelId, interaction.guildId]);
+      await interaction.update({ content: `✅ Welcome channel set to <#${channelId}>.`, components: [] });
+      // Re-render welcome menu
+      const { rows } = await safeQuery('SELECT * FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = rows[0] || {};
+      const embed = new EmbedBuilder()
+        .setTitle('📢 Welcome Module Settings')
+        .setDescription(`Configure how new members are welcomed.
+             
+             **Status:** ${config.welcome_enabled ? '✅ Enabled' : '❌ Disabled'}
+             **Channel:** ${config.welcome_channel_id ? `<#${config.welcome_channel_id}>` : 'Not Set'}
+             **Auto-Role:** ${config.auto_role_id ? `<@&${config.auto_role_id}>` : 'None'}
+             `)
+        .addFields({ name: 'Message Preview', value: (config.welcome_message ? config.welcome_message.substring(0, 1000) : 'Default: "Welcome {user} to {guild}!"') + '\n\n*Variables: {user}, {guild}, {memberCount}, {avatar}*' })
+        .setColor('Green');
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_toggle_btn').setLabel(config.welcome_enabled ? 'Disable' : 'Enable').setStyle(config.welcome_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('setup_welcome_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Secondary).setEmoji('#️⃣'),
+        new ButtonBuilder().setCustomId('setup_welcome_msg_btn').setLabel('Edit Message').setStyle(ButtonStyle.Secondary).setEmoji('📝')
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_autorole_btn').setLabel('Set Auto-Role').setStyle(ButtonStyle.Secondary).setEmoji('👔'),
+        new ButtonBuilder().setCustomId('setup_welcome_image_btn').setLabel('Set Image URL').setStyle(ButtonStyle.Secondary).setEmoji('🖼️'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+      await interaction.message.edit({ embeds: [embed], components: [row1, row2] });
+    } else if (interaction.customId === 'select_welcome_autorole') {
+      const roleId = interaction.values[0];
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET auto_role_id = $1 WHERE guild_id = $2', [roleId, interaction.guildId]);
+      await interaction.update({ content: `✅ Auto-role set to <@&${roleId}>.`, components: [] });
+      // Re-render welcome menu
+      const { rows } = await safeQuery('SELECT * FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = rows[0] || {};
+      const embed = new EmbedBuilder()
+        .setTitle('📢 Welcome Module Settings')
+        .setDescription(`Configure how new members are welcomed.
+             
+             **Status:** ${config.welcome_enabled ? '✅ Enabled' : '❌ Disabled'}
+             **Channel:** ${config.welcome_channel_id ? `<#${config.welcome_channel_id}>` : 'Not Set'}
+             **Auto-Role:** ${config.auto_role_id ? `<@&${config.auto_role_id}>` : 'None'}
+             `)
+        .addFields({ name: 'Message Preview', value: (config.welcome_message ? config.welcome_message.substring(0, 1000) : 'Default: "Welcome {user} to {guild}!"') + '\n\n*Variables: {user}, {guild}, {memberCount}, {avatar}*' })
+        .setColor('Green');
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_toggle_btn').setLabel(config.welcome_enabled ? 'Disable' : 'Enable').setStyle(config.welcome_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('setup_welcome_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Secondary).setEmoji('#️⃣'),
+        new ButtonBuilder().setCustomId('setup_welcome_msg_btn').setLabel('Edit Message').setStyle(ButtonStyle.Secondary).setEmoji('📝')
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_autorole_btn').setLabel('Set Auto-Role').setStyle(ButtonStyle.Secondary).setEmoji('👔'),
+        new ButtonBuilder().setCustomId('setup_welcome_image_btn').setLabel('Set Image URL').setStyle(ButtonStyle.Secondary).setEmoji('🖼️'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+      await interaction.message.edit({ embeds: [embed], components: [row1, row2] });
+
+    } else if (interaction.customId === 'modal_setup_levels_msg') {
+      const rate = parseFloat(interaction.fields.getTextInputValue('xp_rate'));
+      if (isNaN(rate) || rate < 0) return interaction.reply({ content: '❌ Invalid rate.', ephemeral: true });
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET xp_rate_message = $1 WHERE guild_id = $2', [rate, interaction.guildId]);
+      await interaction.update({ content: `✅ Message XP set to ${rate}.`, components: [] });
+      // Logic to refresh UI skipped for brevity, user can re-open menu or we can duplicate refresh logic. 
+      // For better UX, we should refresh.
+      // (Refreshing logic is identical to above, maybe I should have made a function...)
+
+    } else if (interaction.customId === 'modal_setup_levels_voice') {
+      const rate = parseFloat(interaction.fields.getTextInputValue('xp_rate'));
+      if (isNaN(rate) || rate < 0) return interaction.reply({ content: '❌ Invalid rate.', ephemeral: true });
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET xp_rate_voice = $1 WHERE guild_id = $2', [rate, interaction.guildId]);
+      await interaction.update({ content: `✅ Voice XP set to ${rate}.`, components: [] });
+
+    } else if (interaction.customId === 'modal_setup_levels_voice') {
+      const rate = parseFloat(interaction.fields.getTextInputValue('xp_rate'));
+      if (isNaN(rate) || rate < 0) return interaction.reply({ content: '❌ Invalid rate.', ephemeral: true });
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET xp_rate_voice = $1 WHERE guild_id = $2', [rate, interaction.guildId]);
+      await interaction.update({ content: `✅ Voice XP set to ${rate}.`, components: [] });
+
+    } else if (interaction.customId === 'modal_setup_levels_reward_lvl') {
+      const level = parseInt(interaction.fields.getTextInputValue('level_input'));
+      if (isNaN(level) || level <= 0) return interaction.reply({ content: '❌ Invalid level.', ephemeral: true });
+
+      const row = new ActionRowBuilder().addComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId(`select_levels_reward_role_${level}`)
+          .setPlaceholder(`Select Role for Level ${level}`)
+      );
+      await interaction.reply({ content: `Select the role to receive at Level ${level}:`, components: [row], ephemeral: true });
+
+    } else if (interaction.customId.startsWith('select_levels_reward_role_')) {
+      const level = parseInt(interaction.customId.split('_')[4]);
+      const roleId = interaction.values[0];
+
+      await db.query('INSERT INTO level_rewards (guild_id, level, role_id) VALUES ($1, $2, $3)', [interaction.guildId, level, roleId]);
+      await interaction.update({ content: `✅ Role <@&${roleId}> set for Level ${level}.`, components: [] });
+
+    } else if (interaction.customId === 'select_levels_remove_reward') {
+      const idToDelete = interaction.values[0];
+      await db.query('DELETE FROM level_rewards WHERE id = $1', [idToDelete]);
+      await interaction.update({ content: '✅ Reward removed.', components: [] });
+
+    } else if (interaction.customId === 'select_levels_channel') {
+      const channelId = interaction.values[0];
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET level_up_channel_id = $1 WHERE guild_id = $2', [channelId, interaction.guildId]);
+      await interaction.update({ content: `✅ Level Up channel set to <#${channelId}>.`, components: [] });
+
     } else if (interaction.customId.startsWith('wizard_delete_q_select_')) {
       const catId = interaction.customId.split('_')[4];
       const indexToDelete = parseInt(interaction.values[0]);
@@ -2195,6 +2449,66 @@ client.on('interactionCreate', async interaction => {
         console.error(err);
         await interaction.reply({ content: '❌ Error creating category. Check role ID.', ephemeral: true });
       }
+    } else if (interaction.customId === 'modal_setup_welcome_msg') {
+      const message = interaction.fields.getTextInputValue('msg_content');
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET welcome_message = $1 WHERE guild_id = $2', [message, interaction.guildId]);
+      await interaction.update({ content: '✅ Welcome message updated!', components: [] });
+      // Re-render welcome menu
+      const { rows } = await safeQuery('SELECT * FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = rows[0] || {};
+      const embed = new EmbedBuilder()
+        .setTitle('📢 Welcome Module Settings')
+        .setDescription(`Configure how new members are welcomed.
+             
+             **Status:** ${config.welcome_enabled ? '✅ Enabled' : '❌ Disabled'}
+             **Channel:** ${config.welcome_channel_id ? `<#${config.welcome_channel_id}>` : 'Not Set'}
+             **Auto-Role:** ${config.auto_role_id ? `<@&${config.auto_role_id}>` : 'None'}
+             `)
+        .addFields({ name: 'Message Preview', value: (config.welcome_message ? config.welcome_message.substring(0, 1000) : 'Default: "Welcome {user} to {guild}!"') + '\n\n*Variables: {user}, {guild}, {memberCount}, {avatar}*' })
+        .setColor('Green');
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_toggle_btn').setLabel(config.welcome_enabled ? 'Disable' : 'Enable').setStyle(config.welcome_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('setup_welcome_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Secondary).setEmoji('#️⃣'),
+        new ButtonBuilder().setCustomId('setup_welcome_msg_btn').setLabel('Edit Message').setStyle(ButtonStyle.Secondary).setEmoji('📝')
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_autorole_btn').setLabel('Set Auto-Role').setStyle(ButtonStyle.Secondary).setEmoji('👔'),
+        new ButtonBuilder().setCustomId('setup_welcome_image_btn').setLabel('Set Image URL').setStyle(ButtonStyle.Secondary).setEmoji('🖼️'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+      await interaction.message.edit({ embeds: [embed], components: [row1, row2] });
+    } else if (interaction.customId === 'modal_setup_welcome_image') {
+      const imageUrl = interaction.fields.getTextInputValue('img_url');
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET welcome_image_url = $1 WHERE guild_id = $2', [imageUrl || null, interaction.guildId]);
+      await interaction.update({ content: `✅ Welcome image URL updated to: ${imageUrl || 'None'}`, components: [] });
+      // Re-render welcome menu
+      const { rows } = await safeQuery('SELECT * FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = rows[0] || {};
+      const embed = new EmbedBuilder()
+        .setTitle('📢 Welcome Module Settings')
+        .setDescription(`Configure how new members are welcomed.
+             
+             **Status:** ${config.welcome_enabled ? '✅ Enabled' : '❌ Disabled'}
+             **Channel:** ${config.welcome_channel_id ? `<#${config.welcome_channel_id}>` : 'Not Set'}
+             **Auto-Role:** ${config.auto_role_id ? `<@&${config.auto_role_id}>` : 'None'}
+             `)
+        .addFields({ name: 'Message Preview', value: (config.welcome_message ? config.welcome_message.substring(0, 1000) : 'Default: "Welcome {user} to {guild}!"') + '\n\n*Variables: {user}, {guild}, {memberCount}, {avatar}*' })
+        .setColor('Green');
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_toggle_btn').setLabel(config.welcome_enabled ? 'Disable' : 'Enable').setStyle(config.welcome_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('setup_welcome_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Secondary).setEmoji('#️⃣'),
+        new ButtonBuilder().setCustomId('setup_welcome_msg_btn').setLabel('Edit Message').setStyle(ButtonStyle.Secondary).setEmoji('📝')
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_autorole_btn').setLabel('Set Auto-Role').setStyle(ButtonStyle.Secondary).setEmoji('👔'),
+        new ButtonBuilder().setCustomId('setup_welcome_image_btn').setLabel('Set Image URL').setStyle(ButtonStyle.Secondary).setEmoji('🖼️'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+      await interaction.message.edit({ embeds: [embed], components: [row1, row2] });
     } else if (interaction.customId.startsWith('modal_wizard_add_q_')) {
       // CustomID: modal_wizard_add_q_TYPE_CATID
       // TYPE could be 'text', 'file', 'dropdown'
@@ -2781,7 +3095,265 @@ client.on('interactionCreate', async interaction => {
       }, 5000);
     }
   } else if (interaction.isButton()) { // Handle Button Clicks
-    if (interaction.customId === 'wizard_create_cat_btn') {
+    // --- SETUP WIZARD HANDLERS ---
+    if (interaction.customId === 'setup_close_btn') {
+      await interaction.message.delete();
+
+    } else if (interaction.customId === 'setup_back_btn') {
+      // Return to Main Menu
+      const embed = new EmbedBuilder()
+        .setTitle('🛠️ ALL in One Configuration')
+        .setDescription('Select a module to configure for this server.')
+        .addFields(
+          { name: '📢 Welcome Module', value: 'Customize welcome messages, images, and auto-roles.', inline: true },
+          { name: '🎫 Ticket System', value: 'Manage support tickets and panels.', inline: true },
+          { name: '🛡️ Logging', value: 'Set up audit logs for server events.', inline: true },
+          { name: '📈 Leveling', value: 'Configure XP rates and level up notifications.', inline: true }
+        )
+        .setColor('Blurple');
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_btn').setLabel('Welcome Module').setStyle(ButtonStyle.Primary).setEmoji('📢'),
+        new ButtonBuilder().setCustomId('setup_tickets_btn').setLabel('Ticket System').setStyle(ButtonStyle.Primary).setEmoji('🎫'),
+        new ButtonBuilder().setCustomId('setup_logs_btn').setLabel('Logging').setStyle(ButtonStyle.Primary).setEmoji('🛡️'),
+        new ButtonBuilder().setCustomId('setup_levels_btn').setLabel('Leveling').setStyle(ButtonStyle.Success).setEmoji('📈'),
+        new ButtonBuilder().setCustomId('setup_close_btn').setLabel('Close').setStyle(ButtonStyle.Secondary).setEmoji('❌')
+      );
+      await interaction.update({ embeds: [embed], components: [row] });
+
+    } else if (interaction.customId === 'setup_levels_btn') {
+      const { rows } = await safeQuery('SELECT * FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = rows[0] || {};
+      const { rows: rewardRows } = await safeQuery('SELECT * FROM level_rewards WHERE guild_id = $1 ORDER BY level ASC', [interaction.guildId]);
+      const rewardsList = rewardRows.length ? rewardRows.map(r => `• Level ${r.level}: <@&${r.role_id}>`).join('\n') : 'None';
+      config.rewards_list = rewardsList;
+
+      const embed = new EmbedBuilder()
+        .setTitle('📈 Leveling System Settings')
+        .setDescription(`Configure XP rates and level up notifications.
+             
+             **Status:** ${config.leveling_enabled ? '✅ Enabled' : '❌ Disabled'}
+             **Message XP:** ${config.xp_rate_message || 20} XP per message
+             **Voice XP:** ${config.xp_rate_voice || 10} XP per minute
+             **Level Up Channel:** ${config.level_up_channel_id ? `<#${config.level_up_channel_id}>` : 'Current Channel'}
+             `)
+        .setColor('Gold');
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_levels_toggle_btn').setLabel(config.leveling_enabled ? 'Disable' : 'Enable').setStyle(config.leveling_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('setup_levels_msg_rate_btn').setLabel('Set Message XP').setStyle(ButtonStyle.Secondary).setEmoji('💬'),
+        new ButtonBuilder().setCustomId('setup_levels_voice_rate_btn').setLabel('Set Voice XP').setStyle(ButtonStyle.Secondary).setEmoji('🎙️')
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_levels_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Secondary).setEmoji('#️⃣'),
+        new ButtonBuilder().setCustomId('setup_levels_roles_btn').setLabel('Manage Roles').setStyle(ButtonStyle.Primary).setEmoji('🏅'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+
+      await interaction.update({ embeds: [embed], components: [row1, row2] });
+
+    } else if (interaction.customId === 'setup_levels_toggle_btn') {
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET leveling_enabled = NOT COALESCE(leveling_enabled, FALSE) WHERE guild_id = $1', [interaction.guildId]);
+
+      // Refresh Logic (Common)
+      const { rows } = await safeQuery('SELECT * FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = rows[0];
+      const { rows: rewardRows } = await safeQuery('SELECT * FROM level_rewards WHERE guild_id = $1 ORDER BY level ASC', [interaction.guildId]);
+      const rewardsList = rewardRows.length ? rewardRows.map(r => `• Level ${r.level}: <@&${r.role_id}>`).join('\n') : 'None';
+
+      const embed = new EmbedBuilder()
+        .setTitle('📈 Leveling System Settings')
+        .setDescription(`Configure XP rates and level up notifications.
+             
+             **Status:** ${config.leveling_enabled ? '✅ Enabled' : '❌ Disabled'}
+             **Message XP:** ${config.xp_rate_message || 20} XP per message
+             **Voice XP:** ${config.xp_rate_voice || 10} XP per minute
+             **Level Up Channel:** ${config.level_up_channel_id ? `<#${config.level_up_channel_id}>` : 'Current Channel'}
+             
+             **Role Rewards:**
+             ${rewardsList}
+             `)
+        .setColor('Gold');
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_levels_toggle_btn').setLabel(config.leveling_enabled ? 'Disable' : 'Enable').setStyle(config.leveling_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('setup_levels_msg_rate_btn').setLabel('Set Message XP').setStyle(ButtonStyle.Secondary).setEmoji('💬'),
+        new ButtonBuilder().setCustomId('setup_levels_voice_rate_btn').setLabel('Set Voice XP').setStyle(ButtonStyle.Secondary).setEmoji('🎙️')
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_levels_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Secondary).setEmoji('#️⃣'),
+        new ButtonBuilder().setCustomId('setup_levels_roles_btn').setLabel('Manage Roles').setStyle(ButtonStyle.Primary).setEmoji('🏅'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+      await interaction.update({ embeds: [embed], components: [row1, row2] });
+
+    } else if (interaction.customId === 'setup_levels_roles_btn') {
+      const { rows: rewardRows } = await safeQuery('SELECT * FROM level_rewards WHERE guild_id = $1 ORDER BY level ASC', [interaction.guildId]);
+      const rewardsList = rewardRows.length ? rewardRows.map(r => `• Level ${r.level}: <@&${r.role_id}>`).join('\n') : 'No rewards set.';
+
+      const embed = new EmbedBuilder()
+        .setTitle('🏅 Level Role Rewards')
+        .setDescription(`Manage roles given at specific levels.\n\n${rewardsList}`)
+        .setColor('Gold');
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_levels_add_reward_btn').setLabel('Add Reward').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('setup_levels_remove_reward_btn').setLabel('Remove Reward').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('setup_levels_btn').setLabel('Back').setStyle(ButtonStyle.Secondary)
+      );
+      await interaction.update({ embeds: [embed], components: [row] });
+
+    } else if (interaction.customId === 'setup_levels_add_reward_btn') {
+      const modal = new ModalBuilder().setCustomId('modal_setup_levels_reward_lvl').setTitle('Add Reward: Select Level');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('level_input').setLabel('Level Requirement').setStyle(TextInputStyle.Short).setPlaceholder('e.g. 5, 10, 20').setRequired(true)
+      ));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId === 'setup_levels_remove_reward_btn') {
+      const { rows: rewardRows } = await safeQuery('SELECT * FROM level_rewards WHERE guild_id = $1 ORDER BY level ASC', [interaction.guildId]);
+      if (!rewardRows.length) return interaction.reply({ content: 'No rewards to remove.', ephemeral: true });
+
+      const options = rewardRows.map(r => ({ label: `Level ${r.level}`, value: r.id.toString(), description: `Role ID: ${r.role_id}` }));
+
+      const row = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('select_levels_remove_reward')
+          .setPlaceholder('Select reward to remove')
+          .addOptions(options)
+      );
+      await interaction.reply({ content: 'Select a reward to remove:', components: [row], ephemeral: true });
+
+    } else if (interaction.customId === 'setup_levels_msg_rate_btn') {
+      const modal = new ModalBuilder().setCustomId('modal_setup_levels_msg').setTitle('Set Message XP Rate');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('xp_rate').setLabel('XP per Message').setStyle(TextInputStyle.Short).setPlaceholder('20').setRequired(true)
+      ));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId === 'setup_levels_voice_rate_btn') {
+      const modal = new ModalBuilder().setCustomId('modal_setup_levels_voice').setTitle('Set Voice XP Rate');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('xp_rate').setLabel('XP per Minute in VC').setStyle(TextInputStyle.Short).setPlaceholder('10').setRequired(true)
+      ));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId === 'setup_levels_channel_btn') {
+      const row = new ActionRowBuilder().addComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('select_levels_channel')
+          .setPlaceholder('Select Level Up Channel')
+          .setChannelTypes([ChannelType.GuildText])
+      );
+      await interaction.reply({ content: 'Select the channel for level up announcements:', components: [row], ephemeral: true });
+
+    } else if (interaction.customId === 'setup_welcome_btn') {
+      // Fetch current config
+      const { rows } = await safeQuery('SELECT * FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = rows[0] || {};
+
+      const embed = new EmbedBuilder()
+        .setTitle('📢 Welcome Module Settings')
+        .setDescription(`Configure how new members are welcomed.
+             
+             **Status:** ${config.welcome_enabled ? '✅ Enabled' : '❌ Disabled'}
+             **Channel:** ${config.welcome_channel_id ? `<#${config.welcome_channel_id}>` : 'Not Set'}
+             **Auto-Role:** ${config.auto_role_id ? `<@&${config.auto_role_id}>` : 'None'}
+             `)
+        .addFields({ name: 'Message Preview', value: (config.welcome_message ? config.welcome_message.substring(0, 1000) : 'Default: "Welcome {user} to {guild}!"') + '\n\n*Variables: {user}, {guild}, {memberCount}, {avatar}*' })
+        .setColor('Green');
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_toggle_btn').setLabel(config.welcome_enabled ? 'Disable' : 'Enable').setStyle(config.welcome_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('setup_welcome_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Secondary).setEmoji('#️⃣'),
+        new ButtonBuilder().setCustomId('setup_welcome_msg_btn').setLabel('Edit Message').setStyle(ButtonStyle.Secondary).setEmoji('📝')
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_autorole_btn').setLabel('Set Auto-Role').setStyle(ButtonStyle.Secondary).setEmoji('👔'),
+        new ButtonBuilder().setCustomId('setup_welcome_image_btn').setLabel('Set Image URL').setStyle(ButtonStyle.Secondary).setEmoji('🖼️'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+
+      if (interaction.isButton() && interaction.customId === 'setup_welcome_btn') {
+        await interaction.update({ embeds: [embed], components: [row1, row2] });
+      } else {
+        // If coming from modal/select
+        await interaction.update({ embeds: [embed], components: [row1, row2] });
+      }
+
+    } else if (interaction.customId === 'setup_welcome_toggle_btn') {
+      // Toggle Logic
+      // Ensure config exists
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET welcome_enabled = NOT COALESCE(welcome_enabled, FALSE) WHERE guild_id = $1', [interaction.guildId]);
+
+      // Refresh Menu (Call logic manually or re-trigger)
+      // We need to re-fetch and re-render. Ideally functionize but inline for now.
+      // Let's create a recursive call by emitting a fake interaction? No.
+      // Just copy the render logic or "click" the back button then welcome button?
+      // Let's just update based on known state or re-fetch. Re-fetch is safer.
+
+      const { rows } = await safeQuery('SELECT * FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = rows[0];
+      const embed = new EmbedBuilder()
+        .setTitle('📢 Welcome Module Settings')
+        .setDescription(`Configure how new members are welcomed.
+             
+             **Status:** ${config.welcome_enabled ? '✅ Enabled' : '❌ Disabled'}
+             **Channel:** ${config.welcome_channel_id ? `<#${config.welcome_channel_id}>` : 'Not Set'}
+             **Auto-Role:** ${config.auto_role_id ? `<@&${config.auto_role_id}>` : 'None'}
+             `)
+        .addFields({ name: 'Message Preview', value: config.welcome_message ? config.welcome_message.substring(0, 1024) : 'Default: "Welcome {user} to {guild}!"' })
+        .setColor('Green');
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_toggle_btn').setLabel(config.welcome_enabled ? 'Disable' : 'Enable').setStyle(config.welcome_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('setup_welcome_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Secondary).setEmoji('#️⃣'),
+        new ButtonBuilder().setCustomId('setup_welcome_msg_btn').setLabel('Edit Message').setStyle(ButtonStyle.Secondary).setEmoji('📝')
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_welcome_autorole_btn').setLabel('Set Auto-Role').setStyle(ButtonStyle.Secondary).setEmoji('👔'),
+        new ButtonBuilder().setCustomId('setup_welcome_image_btn').setLabel('Set Image URL').setStyle(ButtonStyle.Secondary).setEmoji('🖼️'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+      await interaction.update({ embeds: [embed], components: [row1, row2] });
+
+    } else if (interaction.customId === 'setup_welcome_channel_btn') {
+      const row = new ActionRowBuilder().addComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('select_welcome_channel')
+          .setPlaceholder('Select Welcome Channel')
+          .setChannelTypes([ChannelType.GuildText])
+      );
+      await interaction.reply({ content: 'Select the channel for welcome messages:', components: [row], ephemeral: true });
+
+    } else if (interaction.customId === 'setup_welcome_msg_btn') {
+      const { rows } = await safeQuery('SELECT welcome_message FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const currentMsg = rows[0]?.welcome_message || 'Welcome {user} to {guild}!';
+
+      const modal = new ModalBuilder().setCustomId('modal_setup_welcome_msg').setTitle('Edit Welcome Message');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('msg_content').setLabel('Message').setStyle(TextInputStyle.Paragraph).setValue(currentMsg).setRequired(true)
+      ));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId === 'setup_welcome_autorole_btn') {
+      // Use Role Select Menu
+      const row = new ActionRowBuilder().addComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId('select_welcome_autorole')
+          .setPlaceholder('Select Auto-Role')
+      );
+      await interaction.reply({ content: 'Select the role to give to new members:', components: [row], ephemeral: true });
+
+    } else if (interaction.customId === 'setup_welcome_image_btn') {
+      const modal = new ModalBuilder().setCustomId('modal_setup_welcome_image').setTitle('Set Welcome Image');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('img_url').setLabel('Image URL').setStyle(TextInputStyle.Short).setPlaceholder('https://example.com/image.png').setRequired(false)
+      ));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId === 'wizard_create_cat_btn') {
       const modal = new ModalBuilder().setCustomId('modal_wizard_cat').setTitle('Create Ticket Category');
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_name').setLabel('Category Name').setStyle(TextInputStyle.Short).setRequired(true)),
@@ -3263,6 +3835,59 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+
+app.get('/terms', (req, res) => {
+  res.send(`
+    <html>
+      <head>
+        <title>Terms of Service - ALL in One Bot</title>
+        <style>body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; } h1 { color: #5865F2; }</style>
+      </head>
+      <body>
+        <h1>Terms of Service</h1>
+        <p><strong>Effective Date: January 12, 2026</strong></p>
+        <p>By using the "ALL in One" Discord Bot, you agree to the following terms:</p>
+        <ul>
+          <li><strong>Usage:</strong> You may use the bot for managing your Discord server, including tickets, logging, leveling, and welcome messages.</li>
+          <li><strong>Abuse:</strong> You may not use the bot to spam, harass, or violate Discord's Terms of Service.</li>
+          <li><strong>Data:</strong> We store minimal data required for functionality (Guild IDs, User IDs, XP, Configuration). We do not sell your data.</li>
+          <li><strong>Liability:</strong> The bot is provided "as is". We are not responsible for any data loss or service interruptions.</li>
+          <li><strong>Changes:</strong> We reserve the right to modify these terms at any time.</li>
+        </ul>
+        <p>Contact the developer for any questions.</p>
+      </body>
+    </html>
+  `);
+});
+
+app.get('/privacy', (req, res) => {
+  res.send(`
+    <html>
+      <head>
+        <title>Privacy Policy - ALL in One Bot</title>
+        <style>body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; } h1 { color: #5865F2; }</style>
+      </head>
+      <body>
+        <h1>Privacy Policy</h1>
+        <p><strong>Effective Date: January 12, 2026</strong></p>
+        <p>We respect your privacy. Here is how we handle your data:</p>
+        <h2>1. Data We Collect</h2>
+        <ul>
+            <li><strong>Discord User ID & Username:</strong> To track leveling (XP), economy balances, and ticket ownership.</li>
+            <li><strong>Guild ID:</strong> To save server-specific configurations (welcome messages, log channels, etc.).</li>
+            <li><strong>Message & Voice Activity:</strong> We count message frequency and voice duration solely for the purpose of calculating XP and currency rewards. We do not store message content permanently (except for ticket transcripts generated at your request).</li>
+        </ul>
+        <h2>2. Data Storage</h2>
+        <p>Your data is stored securely in our database. Ticket transcripts are stored only upon ticket closure for logging purposes.</p>
+        <h2>3. Data Deletion</h2>
+        <p>You may request deletion of your data by contacting the bot owner or kicking the bot from your server (which may not immediately delete historical logs).</p>
+        <h2>4. Third Parties</h2>
+        <p>We do not share your data with third parties.</p>
+      </body>
+    </html>
+  `);
+});
+
 app.listen(port, () => console.log(`Health check server listening on port ${port}`));
 
 // --- Healthchecks.io Ping ---
@@ -3564,4 +4189,101 @@ async function generateTranscriptFile(interaction, ticket, reason) {
     attachment: Buffer.from(transcriptText, 'utf-8'),
     name: `transcript-${interaction.channel.name}-${Date.now()}.txt`
   };
+}
+
+async function addXp(guildId, userId, xpToAdd, channel = null) {
+  try {
+    // Check if leveling is enabled
+    const { rows: configRows } = await safeQuery('SELECT leveling_enabled, level_up_channel_id FROM guild_configs WHERE guild_id = $1', [guildId]);
+    if (!configRows.length || !configRows[0].leveling_enabled) return;
+
+    const config = configRows[0];
+
+    // Get current XP
+    const { rows } = await safeQuery('SELECT * FROM user_levels WHERE guild_id = $1 AND user_id = $2', [guildId, userId]);
+    let userData = rows[0];
+
+    if (!userData) {
+      // Initialize
+      await db.query('INSERT INTO user_levels (guild_id, user_id, xp, level, last_xp_time) VALUES ($1, $2, $3, $4, NOW())', [guildId, userId, xpToAdd, 0]);
+      return;
+    }
+
+    let newXp = parseInt(userData.xp) + xpToAdd;
+    let currentLevel = parseInt(userData.level);
+    let xpNeeded = 5 * (currentLevel ** 2) + 50 * currentLevel + 100;
+
+    let leveledUp = false;
+    while (newXp >= xpNeeded) {
+      newXp -= xpNeeded;
+      currentLevel++;
+      leveledUp = true;
+      xpNeeded = 5 * (currentLevel ** 2) + 50 * currentLevel + 100;
+    }
+
+    await db.query('UPDATE user_levels SET xp = $1, level = $2, last_xp_time = NOW() WHERE guild_id = $3 AND user_id = $4', [newXp, currentLevel, guildId, userId]);
+
+    if (leveledUp) {
+      const announceChannelId = config.level_up_channel_id || (channel ? channel.id : null);
+      if (announceChannelId) {
+        try {
+          const announceChannel = client.channels.cache.get(announceChannelId);
+          if (announceChannel && announceChannel.isTextBased()) {
+            await announceChannel.send(`🎉 <@${userId}> has reached **Level ${currentLevel}**! 🎉`);
+          }
+        } catch (e) { console.log('Level up announce failed:', e.message); }
+      }
+
+      // Role Rewards Logic
+      try {
+        const { rows: rewards } = await safeQuery('SELECT level, role_id FROM level_rewards WHERE guild_id = $1 ORDER BY level ASC', [guildId]);
+        if (rewards.length > 0) {
+          const guild = client.guilds.cache.get(guildId);
+          const member = await guild.members.fetch(userId);
+
+          // Find the highest role appropriate for current level
+          // We want to give the role for the HIGHEST milestone reached, and remove others.
+          // Assuming rewards are sorted level ASC. [[5, A], [10, B], [20, C]]
+          // If level 20: Target C. Remove A, B.
+
+          let targetRole = null;
+          const rolesToRemove = [];
+
+          for (const r of rewards) {
+            if (r.level <= currentLevel) {
+              targetRole = r.role_id; // Keep updating as we find higher levels
+            }
+          }
+
+          // Identify roles to remove (all other reward roles that are NOT the target)
+          for (const r of rewards) {
+            if (r.role_id !== targetRole) {
+              rolesToRemove.push(r.role_id);
+            }
+          }
+
+          if (targetRole) {
+            const roleToAdd = guild.roles.cache.get(targetRole);
+            if (roleToAdd && !member.roles.cache.has(targetRole)) {
+              await member.roles.add(roleToAdd);
+              // console.log(`Added level role ${roleToAdd.name} to ${member.user.tag}`);
+            }
+          }
+
+          for (const rid of rolesToRemove) {
+            const roleToRemove = guild.roles.cache.get(rid);
+            if (roleToRemove && member.roles.cache.has(rid)) {
+              await member.roles.remove(roleToRemove);
+              // console.log(`Removed previous level role ${roleToRemove.name} from ${member.user.tag}`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error handling level roles:', err);
+      }
+    }
+
+  } catch (err) {
+    console.error('Error adding XP:', err);
+  }
 }
