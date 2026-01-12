@@ -1962,13 +1962,21 @@ client.on('interactionCreate', async interaction => {
 
       const ticketId = interaction.options.getString('ticket_id');
 
-      // If no ID provided, show list of all closed tickets
+      // If no ID provided, show list of all closed tickets with pagination
       if (!ticketId) {
-        const { rows: allTranscripts } = await safeQuery('SELECT channel_id, user_id, reason, closed_at FROM ticket_transcripts WHERE guild_id = $1 ORDER BY closed_at DESC LIMIT 25', [interaction.guildId]);
+        // Count total
+        const { rows: countRows } = await safeQuery('SELECT COUNT(*) as total FROM ticket_transcripts WHERE guild_id = $1', [interaction.guildId]);
+        const totalTickets = parseInt(countRows[0]?.total || 0);
 
-        if (allTranscripts.length === 0) {
+        if (totalTickets === 0) {
           return interaction.reply({ content: '📭 No ticket backups found for this server.', ephemeral: true });
         }
+
+        const page = 0;
+        const perPage = 25;
+        const totalPages = Math.ceil(totalTickets / perPage);
+
+        const { rows: allTranscripts } = await safeQuery('SELECT channel_id, user_id, reason, closed_at FROM ticket_transcripts WHERE guild_id = $1 ORDER BY closed_at DESC LIMIT $2 OFFSET $3', [interaction.guildId, perPage, page * perPage]);
 
         const options = allTranscripts.map(t =>
           new StringSelectMenuOptionBuilder()
@@ -1977,14 +1985,20 @@ client.on('interactionCreate', async interaction => {
             .setValue(t.channel_id)
         );
 
-        const row = new ActionRowBuilder().addComponents(
+        const selectRow = new ActionRowBuilder().addComponents(
           new StringSelectMenuBuilder()
             .setCustomId('select_ticket_backup')
             .setPlaceholder('Select a ticket to view')
             .addOptions(options)
         );
 
-        return interaction.reply({ content: '📂 **Select a ticket backup to view:**', components: [row], ephemeral: true });
+        const buttonRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`ticket_backup_page_${page - 1}`).setLabel('⬅️ Previous').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
+          new ButtonBuilder().setCustomId('ticket_backup_info').setLabel(`Page ${page + 1}/${totalPages} (${totalTickets} total)`).setStyle(ButtonStyle.Secondary).setDisabled(true),
+          new ButtonBuilder().setCustomId(`ticket_backup_page_${page + 1}`).setLabel('Next ➡️').setStyle(ButtonStyle.Secondary).setDisabled(page >= totalPages - 1)
+        );
+
+        return interaction.reply({ content: '📂 **Select a ticket backup to view:**', components: [selectRow, buttonRow], ephemeral: true });
       }
 
       const { rows } = await safeQuery('SELECT * FROM ticket_transcripts WHERE channel_id = $1', [ticketId]);
@@ -3424,6 +3438,41 @@ client.on('interactionCreate', async interaction => {
           .setChannelTypes([ChannelType.GuildCategory])
       );
       await interaction.reply({ content: 'Select the Discord category where new ticket channels will be created:', components: [row], ephemeral: true });
+
+    } else if (interaction.customId.startsWith('ticket_backup_page_')) {
+      const page = parseInt(interaction.customId.split('_')[3]);
+      if (isNaN(page) || page < 0) return;
+
+      const perPage = 25;
+      const { rows: countRows } = await safeQuery('SELECT COUNT(*) as total FROM ticket_transcripts WHERE guild_id = $1', [interaction.guildId]);
+      const totalTickets = parseInt(countRows[0]?.total || 0);
+      const totalPages = Math.ceil(totalTickets / perPage);
+
+      if (page >= totalPages) return interaction.reply({ content: 'No more pages.', ephemeral: true });
+
+      const { rows: allTranscripts } = await safeQuery('SELECT channel_id, user_id, reason, closed_at FROM ticket_transcripts WHERE guild_id = $1 ORDER BY closed_at DESC LIMIT $2 OFFSET $3', [interaction.guildId, perPage, page * perPage]);
+
+      const options = allTranscripts.map(t =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(`Ticket ${t.channel_id.slice(-6)}`)
+          .setDescription(`User: ${t.user_id} | ${t.reason?.substring(0, 50) || 'No reason'}`)
+          .setValue(t.channel_id)
+      );
+
+      const selectRow = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('select_ticket_backup')
+          .setPlaceholder('Select a ticket to view')
+          .addOptions(options)
+      );
+
+      const buttonRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`ticket_backup_page_${page - 1}`).setLabel('⬅️ Previous').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
+        new ButtonBuilder().setCustomId('ticket_backup_info').setLabel(`Page ${page + 1}/${totalPages} (${totalTickets} total)`).setStyle(ButtonStyle.Secondary).setDisabled(true),
+        new ButtonBuilder().setCustomId(`ticket_backup_page_${page + 1}`).setLabel('Next ➡️').setStyle(ButtonStyle.Secondary).setDisabled(page >= totalPages - 1)
+      );
+
+      await interaction.update({ content: '📂 **Select a ticket backup to view:**', components: [selectRow, buttonRow] });
 
       // --- LOGS WIZARD ---
     } else if (interaction.customId === 'setup_logs_btn') {
