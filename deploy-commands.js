@@ -324,12 +324,11 @@ const ticketCommands = [
 
   new SlashCommandBuilder()
     .setName('ticket-backup')
-    .setDescription('Admin: Get the transcript of a closed ticket')
+    .setDescription('Admin: Get the transcript of a closed ticket (leave empty for list)')
     .addStringOption(option =>
       option.setName('ticket_id')
-        .setDescription('Channel ID of the ticket')
-        .setRequired(true)
-        .setAutocomplete(true)),
+        .setDescription('Channel ID of the ticket (optional)')
+        .setRequired(false)),
 ];
 
 commands.push(...ticketCommands.map(command => command.toJSON()));

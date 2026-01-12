@@ -1961,6 +1961,32 @@ client.on('interactionCreate', async interaction => {
       }
 
       const ticketId = interaction.options.getString('ticket_id');
+
+      // If no ID provided, show list of all closed tickets
+      if (!ticketId) {
+        const { rows: allTranscripts } = await safeQuery('SELECT channel_id, user_id, reason, closed_at FROM ticket_transcripts WHERE guild_id = $1 ORDER BY closed_at DESC LIMIT 25', [interaction.guildId]);
+
+        if (allTranscripts.length === 0) {
+          return interaction.reply({ content: '📭 No ticket backups found for this server.', ephemeral: true });
+        }
+
+        const options = allTranscripts.map(t =>
+          new StringSelectMenuOptionBuilder()
+            .setLabel(`Ticket ${t.channel_id.slice(-6)}`)
+            .setDescription(`User: ${t.user_id} | ${t.reason?.substring(0, 50) || 'No reason'}`)
+            .setValue(t.channel_id)
+        );
+
+        const row = new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('select_ticket_backup')
+            .setPlaceholder('Select a ticket to view')
+            .addOptions(options)
+        );
+
+        return interaction.reply({ content: '📂 **Select a ticket backup to view:**', components: [row], ephemeral: true });
+      }
+
       const { rows } = await safeQuery('SELECT * FROM ticket_transcripts WHERE channel_id = $1', [ticketId]);
 
       if (rows.length === 0) return interaction.reply({ content: '❌ Backup not found or expired (backups are kept for 7 days).', ephemeral: true });
@@ -2347,6 +2373,41 @@ client.on('interactionCreate', async interaction => {
       await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
       await db.query('UPDATE guild_configs SET giveaway_role_id = $1 WHERE guild_id = $2', [roleId, interaction.guildId]);
       await interaction.update({ content: `✅ Giveaway ping role set to <@&${roleId}>.`, components: [] });
+
+    } else if (interaction.customId === 'select_ticket_backup') {
+      const ticketId = interaction.values[0];
+      const { rows } = await safeQuery('SELECT * FROM ticket_transcripts WHERE channel_id = $1', [ticketId]);
+
+      if (rows.length === 0) return interaction.update({ content: '❌ Backup not found.', components: [] });
+
+      const transcript = rows[0];
+      const buffer = Buffer.from(transcript.transcript || 'No Content', 'utf-8');
+      const attachment = new AttachmentBuilder(buffer, { name: `transcript-${transcript.channel_id}.txt` });
+
+      const embed = new EmbedBuilder()
+        .setTitle('📂 Ticket Transcript')
+        .setDescription(`**Ticket ID:** ${transcript.channel_id}\n**User:** <@${transcript.user_id}>\n**Closed By:** <@${transcript.closed_by}>\n**Reason:** ${transcript.reason}\n**Date:** <t:${Math.floor(new Date(transcript.closed_at).getTime() / 1000)}:f>`)
+        .setColor('Blue');
+
+      await interaction.update({ content: '', embeds: [embed], files: [attachment], components: [] });
+
+    } else if (interaction.customId === 'select_ticket_channel') {
+      const channelId = interaction.values[0];
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET ticket_dashboard_channel_id = $1 WHERE guild_id = $2', [channelId, interaction.guildId]);
+      await interaction.update({ content: `✅ Ticket dashboard channel set to <#${channelId}>.`, components: [] });
+
+    } else if (interaction.customId === 'select_ticket_parent') {
+      const categoryId = interaction.values[0];
+      await db.query('INSERT INTO guild_configs (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [interaction.guildId]);
+      await db.query('UPDATE guild_configs SET ticket_parent_id = $1 WHERE guild_id = $2', [categoryId, interaction.guildId]);
+      await interaction.update({ content: `✅ Ticket parent category set to <#${categoryId}>.`, components: [] });
+
+    } else if (interaction.customId === 'select_del_ticket_cat') {
+      const catId = interaction.values[0];
+      await safeQuery('DELETE FROM ticket_categories WHERE id = $1', [catId]);
+      await interaction.update({ content: `✅ Category removed.`, components: [] });
+      await updateTicketDashboard(interaction.guild);
 
     } else if (interaction.customId.startsWith('wizard_delete_q_select_')) {
       const catId = interaction.customId.split('_')[4];
@@ -3206,11 +3267,12 @@ client.on('interactionCreate', async interaction => {
 
       // --- TICKETS WIZARD ---
     } else if (interaction.customId === 'setup_tickets_btn') {
-      const { rows: configRows } = await safeQuery('SELECT ticket_dashboard_channel_id, ticket_panel_type FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const { rows: configRows } = await safeQuery('SELECT ticket_dashboard_channel_id, ticket_panel_type, ticket_mode, ticket_parent_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const config = configRows[0] || {};
       const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1', [interaction.guildId]);
 
       const categoriesList = catRows.length > 0 ? catRows.map(c => `${c.emoji} **${c.name}** (<@&${c.staff_role_id}>)`).join('\n') : 'No categories configured.';
+      const ticketMode = config.ticket_mode === 'channels' ? 'Channels 📁' : 'Threads 🧵';
 
       const embed = new EmbedBuilder()
         .setTitle('🎫 Ticket System Configuration')
@@ -3218,6 +3280,8 @@ client.on('interactionCreate', async interaction => {
         
         **Dashboard Channel:** ${config.ticket_dashboard_channel_id ? `<#${config.ticket_dashboard_channel_id}>` : 'Not Set'}
         **Panel Style:** ${config.ticket_panel_type === 'dropdown' ? 'Dropdown Menu 🔽' : 'Buttons 🔘'}
+        **Ticket Mode:** ${ticketMode}
+        ${config.ticket_mode === 'channels' ? `**Ticket Category:** ${config.ticket_parent_id ? `<#${config.ticket_parent_id}>` : 'Not Set'}` : ''}
         
         **Categories:**
         ${categoriesList}`)
@@ -3226,17 +3290,16 @@ client.on('interactionCreate', async interaction => {
       const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('setup_tickets_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Primary).setEmoji('#️⃣'),
         new ButtonBuilder().setCustomId('setup_tickets_style_btn').setLabel('Switch Style').setStyle(ButtonStyle.Secondary).setEmoji('🔄'),
+        new ButtonBuilder().setCustomId('setup_tickets_mode_btn').setLabel('Switch Mode').setStyle(ButtonStyle.Secondary).setEmoji('📦'),
         new ButtonBuilder().setCustomId('setup_tickets_refresh_panel_btn').setLabel('Update Panel').setStyle(ButtonStyle.Success).setEmoji('🚀')
       );
 
       const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('setup_tickets_add_cat_btn').setLabel('Add Category').setStyle(ButtonStyle.Success).setEmoji('wm_add:1326752002130083901'), // Using standard emoji if custom fails? I'll use standard 'Eq'
+        new ButtonBuilder().setCustomId('setup_tickets_add_cat_btn').setLabel('Add Category').setStyle(ButtonStyle.Success).setEmoji('➕'),
         new ButtonBuilder().setCustomId('setup_tickets_del_cat_btn').setLabel('Remove Category').setStyle(ButtonStyle.Danger).setEmoji('🗑️'),
+        new ButtonBuilder().setCustomId('setup_tickets_parent_btn').setLabel('Set Parent Category').setStyle(ButtonStyle.Secondary).setEmoji('📂').setDisabled(config.ticket_mode !== 'channels'),
         new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
       );
-
-      // Fix emoji for Add Button if needed
-      row2.components[0].setEmoji('➕');
 
       await interaction.update({ embeds: [embed], components: [row1, row2] });
 
@@ -3310,6 +3373,57 @@ client.on('interactionCreate', async interaction => {
         new StringSelectMenuBuilder().setCustomId('select_del_ticket_cat').setPlaceholder('Select category to remove').addOptions(options)
       );
       await interaction.reply({ content: 'Select category to remove:', components: [row], ephemeral: true });
+
+    } else if (interaction.customId === 'setup_tickets_mode_btn') {
+      // Toggle between 'threads' and 'channels'
+      await db.query(`
+        INSERT INTO guild_configs (guild_id, ticket_mode) VALUES ($1, 'channels') 
+        ON CONFLICT (guild_id) DO UPDATE SET ticket_mode = CASE WHEN COALESCE(guild_configs.ticket_mode, 'threads') = 'threads' THEN 'channels' ELSE 'threads' END
+      `, [interaction.guildId]);
+
+      // Refresh the menu by simulating clicking setup_tickets_btn
+      const { rows: configRows } = await safeQuery('SELECT ticket_dashboard_channel_id, ticket_panel_type, ticket_mode, ticket_parent_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = configRows[0] || {};
+      const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1', [interaction.guildId]);
+      const categoriesList = catRows.length > 0 ? catRows.map(c => `${c.emoji} **${c.name}** (<@&${c.staff_role_id}>)`).join('\n') : 'No categories configured.';
+      const ticketMode = config.ticket_mode === 'channels' ? 'Channels 📁' : 'Threads 🧵';
+
+      const embed = new EmbedBuilder()
+        .setTitle('🎫 Ticket System Configuration')
+        .setDescription(`Configure your ticket panel, style, and categories.
+        
+        **Dashboard Channel:** ${config.ticket_dashboard_channel_id ? `<#${config.ticket_dashboard_channel_id}>` : 'Not Set'}
+        **Panel Style:** ${config.ticket_panel_type === 'dropdown' ? 'Dropdown Menu 🔽' : 'Buttons 🔘'}
+        **Ticket Mode:** ${ticketMode}
+        ${config.ticket_mode === 'channels' ? `**Ticket Category:** ${config.ticket_parent_id ? `<#${config.ticket_parent_id}>` : 'Not Set'}` : ''}
+        
+        **Categories:**
+        ${categoriesList}`)
+        .setColor('Blue');
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_tickets_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Primary).setEmoji('#️⃣'),
+        new ButtonBuilder().setCustomId('setup_tickets_style_btn').setLabel('Switch Style').setStyle(ButtonStyle.Secondary).setEmoji('🔄'),
+        new ButtonBuilder().setCustomId('setup_tickets_mode_btn').setLabel('Switch Mode').setStyle(ButtonStyle.Secondary).setEmoji('📦'),
+        new ButtonBuilder().setCustomId('setup_tickets_refresh_panel_btn').setLabel('Update Panel').setStyle(ButtonStyle.Success).setEmoji('🚀')
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_tickets_add_cat_btn').setLabel('Add Category').setStyle(ButtonStyle.Success).setEmoji('➕'),
+        new ButtonBuilder().setCustomId('setup_tickets_del_cat_btn').setLabel('Remove Category').setStyle(ButtonStyle.Danger).setEmoji('🗑️'),
+        new ButtonBuilder().setCustomId('setup_tickets_parent_btn').setLabel('Set Parent Category').setStyle(ButtonStyle.Secondary).setEmoji('📂').setDisabled(config.ticket_mode !== 'channels'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+      await interaction.update({ embeds: [embed], components: [row1, row2] });
+
+    } else if (interaction.customId === 'setup_tickets_parent_btn') {
+      // Show Category channel select (for Discord category, not ticket category)
+      const row = new ActionRowBuilder().addComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('select_ticket_parent')
+          .setPlaceholder('Select Parent Category')
+          .setChannelTypes([ChannelType.GuildCategory])
+      );
+      await interaction.reply({ content: 'Select the Discord category where new ticket channels will be created:', components: [row], ephemeral: true });
 
       // --- LOGS WIZARD ---
     } else if (interaction.customId === 'setup_logs_btn') {

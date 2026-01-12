@@ -416,6 +416,8 @@ async function initializeDatabase() {
       await client.query('ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS giveaway_role_id TEXT');
       await client.query('ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS admin_role_id TEXT');
       await client.query("ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS ticket_panel_type TEXT DEFAULT 'buttons'");
+      await client.query("ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS ticket_mode TEXT DEFAULT 'threads'");
+      await client.query("ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS ticket_parent_id TEXT");
     } catch (err) {
       console.log('Migration note (general config):', err.message);
     }
