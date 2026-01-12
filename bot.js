@@ -954,9 +954,9 @@ client.on('interactionCreate', async interaction => {
           `🪙 Gold: ${(row?.gold || 0).toLocaleString('en-US')}\n` +
           `🪵 Wood: ${(row?.wood || 0).toLocaleString('en-US')}\n` +
           `🌽 Food: ${(row?.food || 0).toLocaleString('en-US')}\n` +
-          `🪨 Stone: ${(row?.stone || 0).toLocaleString('en-US')}\n\n` +
-          `*Resources granted upon temple conquest.*`
+          `🪨 Stone: ${(row?.stone || 0).toLocaleString('en-US')}`
         );
+
 
       await interaction.editReply({ embeds: [embed] });
     } else if (commandName === 'shop') {
@@ -1234,8 +1234,9 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'give') {
       try {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-        const adminIds = (process.env.ADMIN_IDS || '').split(',');
-        if (!adminIds.includes(interaction.user.id)) {
+        const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+        const adminRole = configRows[0]?.admin_role_id;
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
           return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
         }
 
@@ -1274,8 +1275,9 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'take') {
       try {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-        const adminIds = (process.env.ADMIN_IDS || '').split(',');
-        if (!adminIds.includes(interaction.user.id)) {
+        const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+        const adminRole = configRows[0]?.admin_role_id;
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
           return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
         }
 
@@ -1303,9 +1305,45 @@ client.on('interactionCreate', async interaction => {
         await interaction.editReply({ content: `❌ An error occurred while taking currency.` });
       }
 
+    } else if (commandName === 'take-resource') {
+      try {
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+        const adminRole = configRows[0]?.admin_role_id;
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+          return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
+        }
+
+        const targetUser = interaction.options.getUser('user');
+        const resource = interaction.options.getString('resource'); // wood, food, stone, gold
+        const amount = interaction.options.getInteger('amount');
+
+        if (!targetUser || !amount || amount <= 0) {
+          return await interaction.editReply({ content: '❌ Invalid user or amount provided.' });
+        }
+
+        // Check user balance
+        const { rows: userRows } = await safeQuery(`SELECT ${resource} FROM users WHERE id = $1`, [targetUser.id]);
+        const currentAmount = userRows[0]?.[resource] || 0;
+
+        if (currentAmount < amount) {
+          return await interaction.editReply({ content: `❌ User only has **${currentAmount.toLocaleString('en-US')}** ${resource}.` });
+        }
+
+        await safeQuery(`UPDATE users SET ${resource} = ${resource} - $1 WHERE id = $2`, [amount, targetUser.id]);
+
+        await interaction.editReply({ content: `✅ Successfully took **${amount.toLocaleString('en-US')}** ${resource} from ${targetUser}.` });
+        logActivity('🪵 Admin Take Resource', `<@${interaction.user.id}> took **${amount.toLocaleString('en-US')}** ${resource} from ${targetUser}.`, 'Orange', null, interaction.guildId);
+
+      } catch (error) {
+        console.error('Error taking resource:', error);
+        await interaction.editReply({ content: `❌ An error occurred while taking resources.` });
+      }
+
     } else if (commandName === 'shop-add') {
-      const adminIds = (process.env.ADMIN_IDS || '').split(',');
-      if (!adminIds.includes(interaction.user.id)) {
+      const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const adminRole = configRows[0]?.admin_role_id;
+      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
         return interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
       }
 
@@ -1334,8 +1372,9 @@ client.on('interactionCreate', async interaction => {
       }
 
     } else if (commandName === 'shop-remove') {
-      const adminIds = (process.env.ADMIN_IDS || '').split(',');
-      if (!adminIds.includes(interaction.user.id)) {
+      const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const adminRole = configRows[0]?.admin_role_id;
+      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
         return interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
       }
 
@@ -1349,8 +1388,11 @@ client.on('interactionCreate', async interaction => {
       }
 
     } else if (commandName === 'shop-stock') {
-      const adminIds = (process.env.ADMIN_IDS || '').split(',');
-      if (!adminIds.includes(interaction.user.id)) return interaction.reply({ content: '🚫 Admin only.', ephemeral: true });
+      const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const adminRole = configRows[0]?.admin_role_id;
+      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+        return interaction.reply({ content: '🚫 Admin only.', ephemeral: true });
+      }
 
       const id = interaction.options.getInteger('id');
       const amountStr = interaction.options.getString('amount');
@@ -1935,28 +1977,7 @@ client.on('interactionCreate', async interaction => {
 
       await interaction.reply({ embeds: [embed], files: [attachment], ephemeral: true });
 
-    } else if (commandName === 'add-emoji') {
-      const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
-      const adminRole = configRows[0]?.admin_role_id;
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
-        return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
-      }
 
-      const image = interaction.options.getAttachment('image');
-      const name = interaction.options.getString('name');
-
-      await interaction.deferReply({ ephemeral: true });
-
-      try {
-        // Upload to Bot Application (Global Emojis)
-        await client.application.fetch();
-        const emoji = await client.application.emojis.create({ attachment: image.url, name: name });
-        await interaction.editReply({ content: `✅ **Bot Emoji** created successfully! ${emoji}\nID: \`${emoji.id}\`\nUsage: ${emoji.toString()}` });
-      } catch (error) {
-        console.error('Error creating app emoji:', error);
-        // Fallback to Guild Emoji? The user explicitly asked for Bot Emoji.
-        await interaction.editReply({ content: `❌ Failed to create **Bot** emoji. Error: ${error.message}\n\n*Make sure the bot is owned by you or a Team and has slots available.*` });
-      }
     } else if (commandName === 'giveaway') {
       const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const adminRole = configRows[0]?.admin_role_id;
@@ -3907,8 +3928,24 @@ app.use((req, res, next) => {
 });
 
 app.get('/', (req, res) => {
-  res.send('Sovereign Pounds bot is alive!');
+  res.send('All In One Bot is alive!');
 });
+
+// Endpoint for monitoring services (UptimeRobot, Healthchecks.io)
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+// Self-ping logic or external service ping
+const HEALTHCHECK_URL = process.env.HEALTHCHECK_URL;
+if (HEALTHCHECK_URL) {
+  // If user provided a Healthchecks.io URL, ping it periodically
+  setInterval(() => {
+    fetch(HEALTHCHECK_URL)
+      .then(() => console.log('Successfully pinged Healthchecks.io'))
+      .catch(err => console.error('Failed to ping Healthchecks.io:', err.message));
+  }, 300 * 1000); // Every 5 minutes
+}
 
 // API endpoint to get real-time Discord server stats
 // API endpoint to get real-time Discord server stats

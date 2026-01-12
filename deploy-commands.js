@@ -75,6 +75,29 @@ const commands = [
         .setMinValue(0.01)),
 
   new SlashCommandBuilder()
+    .setName('take-resource')
+    .setDescription('Admin: Take resources (wood, food, etc.) from a user.')
+    .addUserOption(option =>
+      option.setName('user')
+        .setDescription('The user to take resources from.')
+        .setRequired(true))
+    .addStringOption(option =>
+      option.setName('resource')
+        .setDescription('Resource type')
+        .setRequired(true)
+        .addChoices(
+          { name: 'Wood', value: 'wood' },
+          { name: 'Food', value: 'food' },
+          { name: 'Stone', value: 'stone' },
+          { name: 'Gold', value: 'gold' }
+        ))
+    .addIntegerOption(option =>
+      option.setName('amount')
+        .setDescription('Amount to take')
+        .setRequired(true)
+        .setMinValue(1)),
+
+  new SlashCommandBuilder()
     .setName('shop-add')
     .setDescription('Admin: Add an item to the shop')
     .addStringOption(option =>
@@ -191,20 +214,7 @@ const commands = [
     .setName('reset-all')
     .setDescription('Admin: Reset all user balances, stats, and resources (IRREVERSIBLE)'),
 
-  new SlashCommandBuilder()
-    .setName('add-emoji')
-    .setDescription('Admin: Upload an image as a server emoji')
-    .addAttachmentOption(option =>
-      option.setName('image')
-        .setDescription('The image file for the emoji')
-        .setRequired(true)
-    )
-    .addStringOption(option =>
-      option.setName('name')
-        .setDescription('Name for the emoji')
-        .setRequired(true)
-        .setRequired(true)
-    ),
+
 
   new SlashCommandBuilder()
     .setName('setup')
