@@ -91,7 +91,7 @@ const EXCLUDED_GIVEAWAY_ROLES = (process.env.EXCLUDED_GIVEAWAY_ROLES || 'bot,bot
 const DEFAULT_GIVEAWAY_PING_ROLE = process.env.DEFAULT_GIVEAWAY_PING_ROLE;
 
 // --- Logging Function ---
-async function logActivity(title, message, color = 'Blue') {
+async function logActivity(title, message, color = 'Blue', attachment = null) {
   const logChannelId = process.env.LOG_CHANNEL_ID;
   if (!logChannelId) return; // Do nothing if the channel ID is not set
 
@@ -103,7 +103,11 @@ async function logActivity(title, message, color = 'Blue') {
         .setDescription(message)
         .setColor(color)
         .setTimestamp();
-      await channel.send({ embeds: [embed] });
+
+      const payload = { embeds: [embed] };
+      if (attachment) payload.files = [attachment];
+
+      await channel.send(payload);
     }
   } catch (error) {
     console.error('Failed to send log message:', error);
@@ -400,6 +404,20 @@ client.once(Events.ClientReady, async () => {
   // Seed the shop if empty
   await seedShop();
 
+  // Database Migrations (Auto-Add Columns for Advanced Ticket Features)
+  try {
+    await db.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS claim_enabled BOOLEAN DEFAULT FALSE`);
+    await db.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS reward_role_id VARCHAR(255)`);
+    await db.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS claimed_by_id VARCHAR(255)`);
+    console.log('✅ Database schema updated (Ticket Features: Claim/Reward/Dashboard).');
+  } catch (e) {
+    console.error('Schema update error:', e);
+  }
+
+  // Initial Dashboard Update
+  const guildObj = client.guilds.cache.get(process.env.GUILD_ID);
+  if (guildObj) updateTicketDashboard(guildObj);
+
   // QOTD Scheduler
   setInterval(async () => {
     const now = new Date();
@@ -467,6 +485,50 @@ client.once(Events.ClientReady, async () => {
 });
 
 /* Welcome Module Removed */
+
+async function updateTicketDashboard(guild) {
+  const ticketerChannelId = '1413983349969780787'; // Dashboard Channel
+  const channel = guild.channels.cache.get(ticketerChannelId);
+  if (!channel) return;
+
+  try {
+    const { rows: tickets } = await db.query(`
+            SELECT t.*, tc.emoji, tc.name as cat_name 
+            FROM tickets t 
+            LEFT JOIN ticket_categories tc ON t.category_id = tc.id 
+            WHERE t.closed = FALSE
+            ORDER BY t.created_at DESC
+        `);
+
+    // Build Description
+    const description = tickets.length > 0 ? tickets.map(t => {
+      const claimStatus = t.claimed_by_id ? `🔒 Claimed by <@${t.claimed_by_id}>` : '👐 Unclaimed';
+      // Discord timestamps are cool too
+      // <t:${Math.floor(new Date(t.created_at).getTime()/1000)}:R>
+      return `> **<#${t.channel_id}>** • <@${t.user_id}> • ${t.emoji || '🎫'} ${t.cat_name}\n> ╚ ${claimStatus}\n`;
+    }).join('\n') : '✅ **No active tickets.** Good job team!';
+
+    const embed = new EmbedBuilder()
+      .setTitle('📋 Active Ticket Dashboard')
+      .setDescription(description)
+      .setColor('Blurple')
+      .setFooter({ text: `Last Updated: ${new Date().toLocaleTimeString()}` });
+
+    // Search for existing dashboard message to edit to avoid spam
+    // We look for the last message by the bot in this channel
+    const messages = await channel.messages.fetch({ limit: 10 });
+    const dashboardMsg = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0 && m.embeds[0].title === '📋 Active Ticket Dashboard');
+
+    if (dashboardMsg) {
+      await dashboardMsg.edit({ embeds: [embed] });
+    } else {
+      // Delete clutter if possible? No.
+      await channel.send({ embeds: [embed] });
+    }
+  } catch (e) {
+    console.error('Error updating dashboard:', e);
+  }
+}
 
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
@@ -1999,7 +2061,7 @@ client.on('interactionCreate', async interaction => {
         new ButtonBuilder().setCustomId(`wizard_add_single_q_${catId}`).setLabel('Add Question').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`wizard_edit_q_menu_${catId}`).setLabel('Edit Question').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`wizard_delete_q_menu_${catId}`).setLabel('Delete Question').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId(`wizard_clear_q_${catId}`).setLabel('Clear All').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`wizard_settings_menu_${catId}`).setLabel('Settings').setStyle(ButtonStyle.Secondary).setEmoji('⚙️'),
         new ButtonBuilder().setCustomId(`wizard_finish_${catId}`).setLabel('Finish').setStyle(ButtonStyle.Success)
       );
 
@@ -2190,7 +2252,7 @@ client.on('interactionCreate', async interaction => {
         new ButtonBuilder().setCustomId(`wizard_add_single_q_${catId}`).setLabel('Add Question').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`wizard_edit_q_menu_${catId}`).setLabel('Edit Question').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`wizard_delete_q_menu_${catId}`).setLabel('Delete Question').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId(`wizard_clear_q_${catId}`).setLabel('Clear All').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`wizard_settings_menu_${catId}`).setLabel('Settings').setStyle(ButtonStyle.Secondary).setEmoji('⚙️'),
         new ButtonBuilder().setCustomId(`wizard_finish_${catId}`).setLabel('Finish Setup').setStyle(ButtonStyle.Success)
       );
 
@@ -2270,11 +2332,20 @@ client.on('interactionCreate', async interaction => {
         new ButtonBuilder().setCustomId(`wizard_add_single_q_${catId}`).setLabel('Add Question').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`wizard_edit_q_menu_${catId}`).setLabel('Edit Question').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`wizard_delete_q_menu_${catId}`).setLabel('Delete Question').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId(`wizard_clear_q_${catId}`).setLabel('Clear All').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`wizard_settings_menu_${catId}`).setLabel('Settings').setStyle(ButtonStyle.Secondary).setEmoji('⚙️'),
         new ButtonBuilder().setCustomId(`wizard_finish_${catId}`).setLabel('Finish Setup').setStyle(ButtonStyle.Success)
       );
 
       await interaction.reply({ embeds: [embed], components: [row] });
+
+
+
+    } else if (interaction.customId.startsWith('modal_wizard_set_role_')) {
+      const catId = interaction.customId.split('_')[4];
+      const roleId = interaction.fields.getTextInputValue('role_id');
+
+      await db.query('UPDATE ticket_categories SET reward_role_id = $1 WHERE id = $2', [roleId || null, catId]);
+      await interaction.reply({ content: `✅ Reward role updated to: ${roleId ? `<@&${roleId}>` : 'None'}`, ephemeral: true });
 
     } else if (interaction.customId.startsWith('modal_ticket_create_') || interaction.customId.startsWith('modal_ticket_submit_')) {
       const parts = interaction.customId.split('_');
@@ -2468,19 +2539,13 @@ client.on('interactionCreate', async interaction => {
           .setDescription(`Welcome <@${interaction.user.id}>!\n\n${answerFields}\n\n<@&${category.staff_role_id}> will be with you shortly.`)
           .setColor('Green');
 
-        const closeButtons = new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder()
-              .setCustomId('close_ticket_btn')
-              .setLabel('Close Ticket')
-              .setStyle(ButtonStyle.Danger)
-              .setEmoji('🔒'),
-            new ButtonBuilder()
-              .setCustomId('close_ticket_reason_btn')
-              .setLabel('Close with Reason')
-              .setStyle(ButtonStyle.Secondary)
-              .setEmoji('📝')
-          );
+        const closeButtons = new ActionRowBuilder();
+        if (category.claim_enabled) closeButtons.addComponents(new ButtonBuilder().setCustomId('claim_ticket_btn').setLabel('Claim').setStyle(ButtonStyle.Success).setEmoji('🙋‍♂️'));
+        if (category.reward_role_id) closeButtons.addComponents(new ButtonBuilder().setCustomId('accept_ticket_btn').setLabel('Accept & Reward').setStyle(ButtonStyle.Primary).setEmoji('✅'));
+        closeButtons.addComponents(
+          new ButtonBuilder().setCustomId('close_ticket_reason_btn').setLabel('Close with Reason').setStyle(ButtonStyle.Secondary).setEmoji('📝'),
+          new ButtonBuilder().setCustomId('close_ticket_btn').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
+        );
 
         await ticketThread.send({ embeds: [welcomeEmbed], components: [closeButtons] });
         await interaction.reply({ content: `✅ Ticket created: <#${ticketThread.id}>`, ephemeral: true });
@@ -2634,21 +2699,45 @@ client.on('interactionCreate', async interaction => {
       logActivity('🎁 Giveaway Created', `<@${interaction.user.id}> created a giveaway: **${totalPrize.toLocaleString('en-US')} 💰** total prize (${entryCost.toLocaleString('en-US')} 💰 entry, ${winnerCount} winner(s))`, 'Gold');
     } else if (interaction.customId === 'modal_close_ticket_reason') {
       const reason = interaction.fields.getTextInputValue('close_reason');
-      await interaction.reply({ content: `🔒 Closing ticket. Reason: ${reason}` });
 
       const { rows } = await safeQuery('SELECT * FROM tickets WHERE channel_id = $1', [interaction.channelId]);
       const ticket = rows[0];
-      const ticketOwner = ticket ? ticket.user_id : 'Unknown';
+      const ticketOwnerID = ticket ? ticket.user_id : null;
+
+      // DM the user
+      if (ticketOwnerID) {
+        try {
+          const user = await interaction.guild.members.fetch(ticketOwnerID);
+          const dmEmbed = new EmbedBuilder()
+            .setTitle('Ticket Closed')
+            .setDescription(`Your ticket **${interaction.channel.name}** has been closed by <@${interaction.user.id}>.`)
+            .addFields({ name: 'Reason', value: reason })
+            .setColor('Red');
+          await user.send({ embeds: [dmEmbed] });
+        } catch (e) {
+          console.log(`Could not DM user ${ticketOwnerID}: ${e.message}`);
+        }
+      }
+
+      await interaction.reply({ content: `🔒 Closing ticket. Reason sent to user: ${reason}` });
+      // Update Dashboard
+      setTimeout(() => updateTicketDashboard(interaction.guild), 2000);
+
+      // (Proceed to close logic...)
 
       // Update DB
       await db.query('UPDATE tickets SET closed = TRUE WHERE channel_id = $1', [interaction.channelId]);
 
       // Log the closure
+      const transcriptFile = await generateTranscriptFile(interaction, ticket, reason);
+
       logActivity(
         '🔒 Ticket Closed',
-        `**Ticket:** ${interaction.channel.name}\n**Closed by:** <@${interaction.user.id}>\n**Owner:** <@${ticketOwner}>\n**Reason:** ${reason}`,
-        'Red'
+        `**Ticket:** ${interaction.channel.name}\n**Closed by:** <@${interaction.user.id}>\n**Owner:** <@${ticketOwnerID}>\n**Reason:** ${reason}\n\n*Transcript attached.*`,
+        'Red',
+        transcriptFile
       );
+      updateTicketDashboard(interaction.guild);
 
       // Create Transcript
       try {
@@ -2701,6 +2790,45 @@ client.on('interactionCreate', async interaction => {
       );
       await interaction.showModal(modal);
       return;
+    } else if (interaction.customId === 'claim_ticket_btn') {
+      const { rows } = await safeQuery('SELECT * FROM tickets WHERE channel_id = $1', [interaction.channelId]);
+      const ticket = rows[0];
+
+      if (ticket.claimed_by_id) {
+        return interaction.reply({ content: `❌ Already claimed by <@${ticket.claimed_by_id}>`, ephemeral: true });
+      }
+
+      await db.query('UPDATE tickets SET claimed_by_id = $1 WHERE channel_id = $2', [interaction.user.id, interaction.channelId]);
+
+      const claimEmbed = new EmbedBuilder()
+        .setDescription(`🙋‍♂️ Ticket claimed by <@${interaction.user.id}>`)
+        .setColor('Gold');
+
+      await interaction.reply({ embeds: [claimEmbed] });
+      updateTicketDashboard(interaction.guild);
+
+    } else if (interaction.customId === 'accept_ticket_btn') {
+      const { rows } = await safeQuery(`
+            SELECT t.*, tc.reward_role_id 
+            FROM tickets t 
+            JOIN ticket_categories tc ON t.category_id = tc.id 
+            WHERE t.channel_id = $1`,
+        [interaction.channelId]
+      );
+      const ticket = rows[0];
+
+      if (!ticket || !ticket.reward_role_id) {
+        return interaction.reply({ content: '❌ No reward role configured for this category.', ephemeral: true });
+      }
+
+      const member = await interaction.guild.members.fetch(ticket.user_id).catch(() => null);
+      if (member) {
+        await member.roles.add(ticket.reward_role_id).catch(e => console.error(e));
+        await interaction.reply({ content: `✅ Application Accepted! <@${ticket.user_id}> has been given the <@&${ticket.reward_role_id}> role.` });
+      } else {
+        await interaction.reply({ content: '❌ User left the server.', ephemeral: true });
+      }
+
     } else if (interaction.customId.startsWith('wizard_add_single_q_')) {
       const catId = interaction.customId.split('_')[4];
 
@@ -2745,10 +2873,92 @@ client.on('interactionCreate', async interaction => {
 
 
 
-    } else if (interaction.customId.startsWith('wizard_finish_')) {
       await interaction.reply({ content: '✅ Setup finished! The category has been configured.', ephemeral: true });
       try { await interaction.channel.delete(); } catch (e) { }
       return;
+
+    } else if (interaction.customId.startsWith('wizard_settings_menu_')) {
+      const catId = interaction.customId.split('_')[3];
+
+      const { rows } = await safeQuery('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
+      if (rows.length === 0) return interaction.reply({ content: 'Category not found.', ephemeral: true });
+      const cat = rows[0];
+
+      const embed = new EmbedBuilder()
+        .setTitle('⚙️ Category Settings')
+        .setDescription(`Configure advanced options for **${cat.name}**`)
+        .addFields(
+          { name: '🙋‍♂️ Claiming System', value: cat.claim_enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+          { name: '🎁 Reward Role', value: cat.reward_role_id ? `<@&${cat.reward_role_id}>` : 'None', inline: true }
+        )
+        .setColor('Grey');
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`wizard_toggle_claim_${catId}`).setLabel(cat.claim_enabled ? 'Disable Claiming' : 'Enable Claiming').setStyle(cat.claim_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`wizard_set_role_btn_${catId}`).setLabel('Set Reward Role').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`wizard_back_main_${catId}`).setLabel('Back').setStyle(ButtonStyle.Secondary)
+      );
+
+      // Check if updating or replying
+      if (interaction.message.embeds[0].title === '⚙️ Category Settings') {
+        await interaction.update({ embeds: [embed], components: [row] });
+      } else {
+        await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+      }
+
+    } else if (interaction.customId.startsWith('wizard_toggle_claim_')) {
+      const catId = interaction.customId.split('_')[3];
+      // Toggle
+      await db.query('UPDATE ticket_categories SET claim_enabled = NOT claim_enabled WHERE id = $1', [catId]);
+
+      // Refresh Settings Menu (Re-trigger logic)
+      // We can just call the logic above or recursing?
+      // Let's copy-paste for safety/simplicity in this tool constraint
+      const { rows } = await safeQuery('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
+      const cat = rows[0];
+
+      const embed = new EmbedBuilder()
+        .setTitle('⚙️ Category Settings')
+        .setDescription(`Configure advanced options for **${cat.name}**`)
+        .addFields(
+          { name: '🙋‍♂️ Claiming System', value: cat.claim_enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+          { name: '🎁 Reward Role', value: cat.reward_role_id ? `<@&${cat.reward_role_id}>` : 'None', inline: true }
+        )
+        .setColor('Grey');
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`wizard_toggle_claim_${catId}`).setLabel(cat.claim_enabled ? 'Disable Claiming' : 'Enable Claiming').setStyle(cat.claim_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`wizard_set_role_btn_${catId}`).setLabel('Set Reward Role').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`wizard_back_main_${catId}`).setLabel('Back').setStyle(ButtonStyle.Secondary)
+      );
+
+      await interaction.update({ embeds: [embed], components: [row] });
+
+    } else if (interaction.customId.startsWith('wizard_set_role_btn_')) {
+      const catId = interaction.customId.split('_')[4];
+      const modal = new ModalBuilder().setCustomId(`modal_wizard_set_role_${catId}`).setTitle('Set Reward Role');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('role_id').setLabel('Role ID').setPlaceholder('123456789...').setStyle(TextInputStyle.Short).setRequired(false)
+      ));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId.startsWith('wizard_back_main_')) {
+      const catId = interaction.customId.split('_')[3];
+      // Trigger the Main Panel Logic (Refresh)
+      // We need to fetch questions etc.
+      // We can just delete this settings message?
+      // Since settings was ephemeral reply or update...
+      // If it was update, we need to restore main view.
+      // But main view logic is complex (fetching questions etc).
+      // Let's try to just delete the settings message if it's ephemeral?
+      // Or if we edited the main message...
+      // The wizard buttons usually `.reply` ephemeral.
+      // So `wizard_settings_menu` sends a NEW ephemeral message.
+      // `back` can just delete this ephemeral message.
+      try { await interaction.message.delete(); } catch (e) { }
+      // Also we might want to ensure the previous message is still there. 
+      // Just return.
+
     } else if (interaction.customId.startsWith('wizard_delete_q_menu_')) {
       const catId = interaction.customId.split('_')[4];
       const { rows } = await db.query('SELECT form_questions FROM ticket_categories WHERE id = $1', [catId]);
@@ -2789,7 +2999,7 @@ client.on('interactionCreate', async interaction => {
         new ButtonBuilder().setCustomId(`wizard_add_single_q_${catId}`).setLabel('Add Question').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`wizard_edit_q_menu_${catId}`).setLabel('Edit Question').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`wizard_delete_q_menu_${catId}`).setLabel('Delete Question').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId(`wizard_clear_q_${catId}`).setLabel('Clear All').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`wizard_settings_menu_${catId}`).setLabel('Settings').setStyle(ButtonStyle.Secondary).setEmoji('⚙️'),
         new ButtonBuilder().setCustomId(`wizard_finish_${catId}`).setLabel('Finish').setStyle(ButtonStyle.Success)
       );
       await interaction.update({ components: [row] });
@@ -2811,40 +3021,22 @@ client.on('interactionCreate', async interaction => {
       // Update DB
       await db.query('UPDATE tickets SET closed = TRUE WHERE channel_id = $1', [interaction.channelId]);
 
+      const transcriptFile = await generateTranscriptFile(interaction, ticket, 'No reason provided');
+
       // Log the closure
       logActivity(
         '🔒 Ticket Closed',
-        `**Ticket:** ${interaction.channel.name}\n**Closed by:** <@${interaction.user.id}>\n**Owner:** <@${ticketOwner}>\n**Reason:** No reason provided.`,
-        'Red'
+        `**Ticket:** ${interaction.channel.name}\n**Closed by:** <@${interaction.user.id}>\n**Owner:** <@${ticketOwner}>\n**Reason:** No reason provided.\n\n*Transcript attached.*`,
+        'Red',
+        transcriptFile
       );
+      updateTicketDashboard(interaction.guild);
 
-      // Create Transcript
+      // Save to Backup Table
       try {
-        let transcriptText = `TRANSCRIPT FOR TICKET: ${interaction.channel.name} (${interaction.channelId})\n`;
-        transcriptText += `USER: ${ticketOwner}\n`;
-        transcriptText += `CLOSED BY: ${interaction.user.tag} (${interaction.user.id})\n`;
-        transcriptText += `REASON: No reason provided.\n`;
-        transcriptText += `DATE: ${new Date().toISOString()}\n`;
-        transcriptText += `--------------------------------------------------\n\n`;
-
-        if (ticket.pending_questions && ticket.answers) {
-          // Interview Mode
-          const answers = typeof ticket.answers === 'string' ? JSON.parse(ticket.answers) : ticket.answers;
-          answers.forEach((a, i) => {
-            transcriptText += `Q${i + 1}: ${a.question}\nA: ${a.answer}\n\n`;
-          });
-        }
-
-        // Fetch last 100 messages for context if needed (optional simple text dump)
-        const messages = await interaction.channel.messages.fetch({ limit: 100 });
-        messages.reverse().forEach(m => {
-          transcriptText += `[${m.createdAt.toISOString()}] ${m.author.tag}: ${m.content} ${m.attachments.size > 0 ? '[Attachment]' : ''}\n`;
-        });
-
-        // Save to Backup Table
         await db.query(
           'INSERT INTO ticket_transcripts (channel_id, guild_id, user_id, transcript, reason, closed_by, closed_at) VALUES ($1, $2, $3, $4, $5, $6, NOW())',
-          [interaction.channelId, interaction.guildId, ticketOwner, transcriptText, 'No reason provided.', interaction.user.id]
+          [interaction.channelId, interaction.guildId, ticketOwner, transcriptFile.attachment.toString('utf-8'), 'No reason provided.', interaction.user.id]
         );
       } catch (err) {
         console.error('Error creating transcript:', err);
@@ -3335,3 +3527,41 @@ async function startBot() {
 }
 
 startBot();
+
+async function generateTranscriptFile(interaction, ticket, reason) {
+  let transcriptText = `TRANSCRIPT FOR TICKET: ${interaction.channel.name} (${interaction.channelId})\n`;
+  transcriptText += `USER ID: ${ticket.user_id}\n`;
+  transcriptText += `CLOSED BY: ${interaction.user.tag} (${interaction.user.id})\n`;
+  transcriptText += `REASON: ${reason}\n`;
+  transcriptText += `DATE: ${new Date().toISOString()}\n`;
+  transcriptText += `--------------------------------------------------\n\n`;
+
+  if (ticket.pending_questions && ticket.answers) {
+    // Interview Mode Content
+    try {
+      const answers = typeof ticket.answers === 'string' ? JSON.parse(ticket.answers) : ticket.answers;
+      answers.forEach((a, i) => {
+        transcriptText += `Q${i + 1}: ${a.question}\nA: ${a.answer}\n\n`;
+      });
+    } catch (e) { }
+  }
+
+  // Fetch messages
+  try {
+    const messages = await interaction.channel.messages.fetch({ limit: 100 });
+    messages.reverse().forEach(m => {
+      const time = m.createdAt.toISOString().split('T')[1].split('.')[0];
+      const author = m.author.tag;
+      const content = m.content;
+      const attachments = m.attachments.size > 0 ? ` [Attachments: ${m.attachments.map(a => a.url).join(', ')}] ` : '';
+      transcriptText += `[${time}] ${author}: ${content}${attachments}\n`;
+    });
+  } catch (e) {
+    transcriptText += `\n[Error fetching messages: ${e.message}]\n`;
+  }
+
+  return {
+    attachment: Buffer.from(transcriptText, 'utf-8'),
+    name: `transcript-${interaction.channel.name}-${Date.now()}.txt`
+  };
+}
