@@ -3204,6 +3204,113 @@ client.on('interactionCreate', async interaction => {
       );
       await interaction.update({ embeds: [embed], components: [row1, row2] });
 
+      // --- TICKETS WIZARD ---
+    } else if (interaction.customId === 'setup_tickets_btn') {
+      const { rows: configRows } = await safeQuery('SELECT ticket_dashboard_channel_id, ticket_panel_type FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = configRows[0] || {};
+      const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1', [interaction.guildId]);
+
+      const categoriesList = catRows.length > 0 ? catRows.map(c => `${c.emoji} **${c.name}** (<@&${c.staff_role_id}>)`).join('\n') : 'No categories configured.';
+
+      const embed = new EmbedBuilder()
+        .setTitle('🎫 Ticket System Configuration')
+        .setDescription(`Configure your ticket panel, style, and categories.
+        
+        **Dashboard Channel:** ${config.ticket_dashboard_channel_id ? `<#${config.ticket_dashboard_channel_id}>` : 'Not Set'}
+        **Panel Style:** ${config.ticket_panel_type === 'dropdown' ? 'Dropdown Menu 🔽' : 'Buttons 🔘'}
+        
+        **Categories:**
+        ${categoriesList}`)
+        .setColor('Blue');
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_tickets_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Primary).setEmoji('#️⃣'),
+        new ButtonBuilder().setCustomId('setup_tickets_style_btn').setLabel('Switch Style').setStyle(ButtonStyle.Secondary).setEmoji('🔄'),
+        new ButtonBuilder().setCustomId('setup_tickets_refresh_panel_btn').setLabel('Update Panel').setStyle(ButtonStyle.Success).setEmoji('🚀')
+      );
+
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_tickets_add_cat_btn').setLabel('Add Category').setStyle(ButtonStyle.Success).setEmoji('wm_add:1326752002130083901'), // Using standard emoji if custom fails? I'll use standard 'Eq'
+        new ButtonBuilder().setCustomId('setup_tickets_del_cat_btn').setLabel('Remove Category').setStyle(ButtonStyle.Danger).setEmoji('🗑️'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+
+      // Fix emoji for Add Button if needed
+      row2.components[0].setEmoji('➕');
+
+      await interaction.update({ embeds: [embed], components: [row1, row2] });
+
+    } else if (interaction.customId === 'setup_tickets_style_btn') {
+      await db.query(`
+        INSERT INTO guild_configs (guild_id, ticket_panel_type) VALUES ($1, 'dropdown') 
+        ON CONFLICT (guild_id) DO UPDATE SET ticket_panel_type = CASE WHEN guild_configs.ticket_panel_type = 'buttons' THEN 'dropdown' ELSE 'buttons' END
+      `, [interaction.guildId]);
+
+      // Refresh Ticket Menu (recurse logic)
+      const { rows: configRows } = await safeQuery('SELECT ticket_dashboard_channel_id, ticket_panel_type FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = configRows[0] || {};
+      const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1', [interaction.guildId]);
+
+      const categoriesList = catRows.length > 0 ? catRows.map(c => `${c.emoji} **${c.name}** (<@&${c.staff_role_id}>)`).join('\n') : 'No categories configured.';
+
+      const embed = new EmbedBuilder()
+        .setTitle('🎫 Ticket System Configuration')
+        .setDescription(`Configure your ticket panel, style, and categories.
+        
+        **Dashboard Channel:** ${config.ticket_dashboard_channel_id ? `<#${config.ticket_dashboard_channel_id}>` : 'Not Set'}
+        **Panel Style:** ${config.ticket_panel_type === 'dropdown' ? 'Dropdown Menu 🔽' : 'Buttons 🔘'}
+        
+        **Categories:**
+        ${categoriesList}`)
+        .setColor('Blue');
+
+      // Re-use rows logic from above (duplicated for simplicity in this edit)
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_tickets_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Primary).setEmoji('#️⃣'),
+        new ButtonBuilder().setCustomId('setup_tickets_style_btn').setLabel('Switch Style').setStyle(ButtonStyle.Secondary).setEmoji('🔄'),
+        new ButtonBuilder().setCustomId('setup_tickets_refresh_panel_btn').setLabel('Update Panel').setStyle(ButtonStyle.Success).setEmoji('🚀')
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_tickets_add_cat_btn').setLabel('Add Category').setStyle(ButtonStyle.Success).setEmoji('➕'),
+        new ButtonBuilder().setCustomId('setup_tickets_del_cat_btn').setLabel('Remove Category').setStyle(ButtonStyle.Danger).setEmoji('🗑️'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+
+      await interaction.update({ embeds: [embed], components: [row1, row2] });
+
+    } else if (interaction.customId === 'setup_tickets_channel_btn') {
+      // Show Channel Select
+      const row = new ActionRowBuilder().addComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId('select_ticket_channel')
+          .setPlaceholder('Select Dashboard Channel')
+          .setChannelTypes([ChannelType.GuildText])
+      );
+      await interaction.reply({ content: 'Select the channel where the ticket panel will be sent:', components: [row], ephemeral: true });
+
+    } else if (interaction.customId === 'setup_tickets_refresh_panel_btn') {
+      await interaction.deferUpdate();
+      await updateTicketDashboard(interaction.guild);
+      await interaction.followUp({ content: '✅ Ticket Dashboard updated!', ephemeral: true });
+
+    } else if (interaction.customId === 'setup_tickets_add_cat_btn') {
+      const modal = new ModalBuilder().setCustomId('modal_add_ticket_cat').setTitle('Add Ticket Category');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_name').setLabel('Category Name').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_emoji').setLabel('Emoji').setStyle(TextInputStyle.Short).setPlaceholder('e.g. 🎫').setRequired(true))
+      );
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId === 'setup_tickets_del_cat_btn') {
+      const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1', [interaction.guildId]);
+      if (catRows.length === 0) return interaction.reply({ content: 'No categories to remove.', ephemeral: true });
+
+      const options = catRows.map(c => new StringSelectMenuOptionBuilder().setLabel(c.name).setValue(c.id.toString()).setEmoji(c.emoji));
+      const row = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder().setCustomId('select_del_ticket_cat').setPlaceholder('Select category to remove').addOptions(options)
+      );
+      await interaction.reply({ content: 'Select category to remove:', components: [row], ephemeral: true });
+
       // --- LOGS WIZARD ---
     } else if (interaction.customId === 'setup_logs_btn') {
       const { rows } = await safeQuery('SELECT log_channel_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
