@@ -214,6 +214,10 @@ const commands = [
     .setName('reset-all')
     .setDescription('Admin: Reset all user balances, stats, and resources (IRREVERSIBLE)'),
 
+  new SlashCommandBuilder()
+    .setName('export-data')
+    .setDescription('Admin: Export all user data as a CSV file'),
+
 
 
   new SlashCommandBuilder()

@@ -1860,11 +1860,10 @@ client.on('interactionCreate', async interaction => {
           { name: '📢 Welcome Module', value: 'Customize welcome messages, images, and auto-roles.', inline: true },
           { name: '🎫 Ticket System', value: 'Manage support tickets and panels.', inline: true },
           { name: '🛡️ Logging', value: 'Set up audit logs for server events.', inline: true },
-          { name: '📈 Leveling System', value: 'Configure XP rates and level-up rewards.', inline: true },
-          { name: '⚙️ Extras', value: 'Configure Admin Role, Google Sheets, and Giveaways.', inline: true }
+          { name: '📈 Leveling System', value: 'Configure XP rates and level-up rewards.', inline: true }
         )
         .setColor('Blurple')
-        .setFooter({ text: 'Sovereign Empire Bot • Setup Wizard' });
+        .setFooter({ text: 'All In One Bot • Setup Wizard' });
 
       const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('setup_welcome_btn').setLabel('Welcome').setStyle(ButtonStyle.Primary).setEmoji('📢'),
@@ -1875,14 +1874,12 @@ client.on('interactionCreate', async interaction => {
 
       const row2 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('setup_admin_btn').setLabel('Admin Role').setStyle(ButtonStyle.Secondary).setEmoji('👮'),
-        new ButtonBuilder().setCustomId('setup_sheet_btn').setLabel('Google Sheet').setStyle(ButtonStyle.Secondary).setEmoji('📊'),
         new ButtonBuilder().setCustomId('setup_giveaways_btn').setLabel('Giveaways').setStyle(ButtonStyle.Secondary).setEmoji('🎁'),
         new ButtonBuilder().setCustomId('setup_close_btn').setLabel('Close').setStyle(ButtonStyle.Danger).setEmoji('❌')
       );
 
       await interaction.reply({ embeds: [embed], components: [row1, row2], ephemeral: true });
 
-      await interaction.reply({ embeds: [embed], components: [row] });
     } else if (commandName === 'reset-all') {
       await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
       const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
@@ -1968,6 +1965,53 @@ client.on('interactionCreate', async interaction => {
       } catch (error) {
         console.error('❌ Error resetting data:', error);
         await interaction.editReply({ content: `❌ Error resetting data: ${error.message}\n\nPlease check the console for more details.` });
+      }
+
+    } else if (commandName === 'export-data') {
+      const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const adminRole = configRows[0]?.admin_role_id;
+      if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+        return interaction.reply({ content: '🚫 Admin only.', ephemeral: true });
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+
+      try {
+        // Fetch all users data
+        const { rows: users } = await safeQuery('SELECT * FROM users');
+        const { rows: messageCounts } = await safeQuery('SELECT * FROM message_counts');
+        const { rows: voiceTimes } = await safeQuery('SELECT * FROM voice_times');
+        const { rows: invites } = await safeQuery('SELECT * FROM invites');
+        const { rows: boosts } = await safeQuery('SELECT * FROM boosts');
+
+        // Create CSV content
+        let csv = 'User ID,Balance,Gold,Wood,Food,Stone,Last Daily,Daily Streak,Messages,Voice Minutes,Invites,Boosts\n';
+
+        // Create a map for quick lookups
+        const msgMap = new Map(messageCounts.map(m => [m.user_id, m.count || 0]));
+        const voiceMap = new Map(voiceTimes.map(v => [v.user_id, v.minutes || 0]));
+        const inviteMap = new Map(invites.map(i => [i.user_id, i.invites || 0]));
+        const boostMap = new Map(boosts.map(b => [b.user_id, b.boosts || 0]));
+
+        for (const user of users) {
+          const msgs = msgMap.get(user.id) || 0;
+          const voice = voiceMap.get(user.id) || 0;
+          const inv = inviteMap.get(user.id) || 0;
+          const boost = boostMap.get(user.id) || 0;
+
+          csv += `${user.id},${user.balance || 0},${user.gold || 0},${user.wood || 0},${user.food || 0},${user.stone || 0},${user.last_daily || ''},${user.daily_streak || 0},${msgs},${voice},${inv},${boost}\n`;
+        }
+
+        const buffer = Buffer.from(csv, 'utf-8');
+        const attachment = new AttachmentBuilder(buffer, { name: `export-${interaction.guildId}-${Date.now()}.csv` });
+
+        await interaction.editReply({
+          content: `📊 **Data Export Complete!**\n\nExported **${users.length}** user records.`,
+          files: [attachment]
+        });
+      } catch (error) {
+        console.error('Error exporting data:', error);
+        await interaction.editReply({ content: `❌ Error exporting data: ${error.message}` });
       }
 
     } else if (commandName === 'ticket-backup') {
@@ -3290,7 +3334,6 @@ client.on('interactionCreate', async interaction => {
 
       const row2 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('setup_admin_btn').setLabel('Admin Role').setStyle(ButtonStyle.Secondary).setEmoji('👮'),
-        new ButtonBuilder().setCustomId('setup_sheet_btn').setLabel('Google Sheet').setStyle(ButtonStyle.Secondary).setEmoji('📊'),
         new ButtonBuilder().setCustomId('setup_giveaways_btn').setLabel('Giveaways').setStyle(ButtonStyle.Secondary).setEmoji('🎁'),
         new ButtonBuilder().setCustomId('setup_close_btn').setLabel('Close').setStyle(ButtonStyle.Danger).setEmoji('❌')
       );
