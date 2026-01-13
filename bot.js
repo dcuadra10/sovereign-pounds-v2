@@ -40,6 +40,23 @@ async function safeQuery(query, params = []) {
   }
 }
 
+// Helper function to safely check if a member has administrator permission
+function hasAdminPermission(member) {
+  if (!member) return false;
+  const perms = member.permissions;
+  if (!perms) return false;
+  // Handle both cases: permissions as BitField object or as a raw bigint/string
+  if (typeof perms.has === 'function') {
+    return perms.has(PermissionFlagsBits.Administrator);
+  }
+  // Fallback: try to interpret as bigint
+  try {
+    return (BigInt(perms) & PermissionFlagsBits.Administrator) === PermissionFlagsBits.Administrator;
+  } catch {
+    return false;
+  }
+}
+
 // Helper function to parse duration string (e.g. 1d, 2h, 30m)
 function parseDuration(durationStr) {
   if (!durationStr) return null;
@@ -1236,7 +1253,7 @@ client.on('interactionCreate', async interaction => {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
         const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
         const adminRole = configRows[0]?.admin_role_id;
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+        if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
           return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
         }
 
@@ -1277,7 +1294,7 @@ client.on('interactionCreate', async interaction => {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
         const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
         const adminRole = configRows[0]?.admin_role_id;
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+        if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
           return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
         }
 
@@ -1310,7 +1327,7 @@ client.on('interactionCreate', async interaction => {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
         const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
         const adminRole = configRows[0]?.admin_role_id;
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+        if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
           return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
         }
 
@@ -1343,7 +1360,7 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'shop-add') {
       const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const adminRole = configRows[0]?.admin_role_id;
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+      if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
         return interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
       }
 
@@ -1374,7 +1391,7 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'shop-remove') {
       const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const adminRole = configRows[0]?.admin_role_id;
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+      if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
         return interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
       }
 
@@ -1390,7 +1407,7 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'shop-stock') {
       const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const adminRole = configRows[0]?.admin_role_id;
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+      if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
         return interaction.reply({ content: '🚫 Admin only.', ephemeral: true });
       }
 
@@ -1659,7 +1676,7 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'ticket-wizard') {
       const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const adminRole = configRows[0]?.admin_role_id;
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+      if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
         console.log('[Wizard Debug] Permission denied.');
         return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
       }
@@ -1795,7 +1812,7 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'ticket-panel-edit') {
       const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const adminRole = configRows[0]?.admin_role_id;
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+      if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
         return await interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
       }
 
@@ -1832,7 +1849,7 @@ client.on('interactionCreate', async interaction => {
 
     } else if (commandName === 'setup') {
       // Main Configuration Wizard Entry Point
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+      if (!hasAdminPermission(interaction.member)) {
         return interaction.reply({ content: '❌ You need Administrator permissions to use this.', ephemeral: true });
       }
 
@@ -1870,7 +1887,7 @@ client.on('interactionCreate', async interaction => {
       await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
       const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const adminRole = configRows[0]?.admin_role_id;
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+      if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
         return await interaction.editReply({ content: '🚫 You do not have permission to use this command.' });
       }
 
@@ -1956,7 +1973,7 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'ticket-backup') {
       const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const adminRole = configRows[0]?.admin_role_id;
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+      if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
         return interaction.reply({ content: '🚫 Admin only.', ephemeral: true });
       }
 
@@ -2021,7 +2038,7 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'giveaway') {
       const { rows: configRows } = await safeQuery('SELECT admin_role_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const adminRole = configRows[0]?.admin_role_id;
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
+      if (!hasAdminPermission(interaction.member) && !(adminRole && interaction.member.roles.cache.has(adminRole))) {
         return interaction.reply({ content: '🚫 You do not have permission to use this command.', ephemeral: true });
       }
 
