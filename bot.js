@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, Events, MessageFlags, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ChannelType, PermissionFlagsBits, ChannelSelectMenuBuilder, RoleSelectMenuBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, Events, MessageFlags, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ChannelType, PermissionFlagsBits, AttachmentBuilder, ChannelSelectMenuBuilder, RoleSelectMenuBuilder } = require('discord.js');
 const { pool: db, initializeDatabase } = require('./database');
 const express = require('express');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
@@ -2143,7 +2143,17 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'shop_buy_select') {
+    if (interaction.customId === 'select_ticket_backup') {
+      const channelId = interaction.values[0];
+      const { rows } = await safeQuery('SELECT transcript FROM ticket_transcripts WHERE channel_id = $1', [channelId]);
+      if (rows.length === 0) return interaction.reply({ content: '❌ Transcript not found.', ephemeral: true });
+
+      const transcript = rows[0].transcript;
+      const attachment = new AttachmentBuilder(Buffer.from(transcript, 'utf-8'), { name: `transcript-${channelId}.txt` });
+
+      await interaction.reply({ content: `📜 **Transcript for Ticket ${channelId}**`, files: [attachment], ephemeral: true });
+
+    } else if (interaction.customId === 'shop_buy_select') {
       const itemId = interaction.values[0];
       try {
         const { rows } = await safeQuery('SELECT * FROM shop_items WHERE id = $1', [itemId]);
@@ -2566,8 +2576,8 @@ client.on('interactionCreate', async interaction => {
       }
 
       await interaction.showModal(modal);
-      // Delete the selection menu message
-      try { await interaction.message.delete(); } catch (e) { }
+      // Delete the selection menu message, safe fall back to hide
+      try { await interaction.message.delete(); } catch (e) { await interaction.message.edit({ components: [] }).catch(() => { }); }
 
     } else if (interaction.customId.startsWith('wizard_q_type_select_')) {
       const catId = interaction.customId.split('_')[4];
@@ -2611,8 +2621,8 @@ client.on('interactionCreate', async interaction => {
         );
         await interaction.showModal(modal);
       }
-      // Clean up the selection message
-      try { await interaction.message.delete(); } catch (e) { }
+      // Clean up the selection message, safe fallback to hide
+      try { await interaction.message.delete(); } catch (e) { await interaction.message.edit({ components: [] }).catch(() => { }); }
     } else if (interaction.customId === 'select_levels_remove_reward') {
       const rewardId = interaction.values[0];
       await db.query('DELETE FROM level_rewards WHERE id = $1', [rewardId]);
@@ -2628,7 +2638,12 @@ client.on('interactionCreate', async interaction => {
 
 
   if (interaction.isChannelSelectMenu() || interaction.isRoleSelectMenu()) {
-    if (interaction.customId === 'select_logs_channel') {
+    if (interaction.customId === 'select_ticket_parent') {
+      const parentId = interaction.values[0];
+      await db.query('INSERT INTO guild_configs (guild_id, ticket_parent_id) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET ticket_parent_id = $2', [interaction.guildId, parentId]);
+      await interaction.update({ content: `✅ Ticket category parent set to <#${parentId}>. Future tickets will be created in this category used as 'Channels' mode.`, components: [] });
+
+    } else if (interaction.customId === 'select_logs_channel') {
       const channelId = interaction.values[0];
       await db.query('INSERT INTO guild_configs (guild_id, log_channel_id) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET log_channel_id = $2', [interaction.guildId, channelId]);
       await interaction.update({ content: `✅ Log channel set to <#${channelId}>`, components: [] });
