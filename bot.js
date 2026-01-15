@@ -417,9 +417,18 @@ async function seedShop() {
   }
 }
 
+// Helper to update presence
+const updateBotPresence = () => {
+  const serverCount = client.guilds.cache.size;
+  client.user.setPresence({
+    activities: [{ name: `${serverCount} Server${serverCount !== 1 ? 's' : ''}`, type: ActivityType.Watching }],
+    status: 'online'
+  });
+};
+
 client.once(Events.ClientReady, async () => {
   console.log(`Logged in as ${client.user.tag}!`);
-  client.user.setPresence({ activities: [{ name: 'Sovereign Empire', type: ActivityType.Watching }], status: 'online' });
+  updateBotPresence();
 
   client.guilds.cache.forEach(async (guild) => {
     try {
@@ -431,88 +440,92 @@ client.once(Events.ClientReady, async () => {
       console.log(`Failed to fetch invites for guild ${guild.name}: ${err.message}`);
     }
   });
+});
 
-  // Seed the shop if empty
-  await seedShop();
+client.on(Events.GuildCreate, () => updateBotPresence());
+client.on(Events.GuildDelete, () => updateBotPresence());
 
-  // Database Migrations (Auto-Add Columns for Advanced Ticket Features)
-  try {
-    await db.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS claim_enabled BOOLEAN DEFAULT FALSE`);
-    await db.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS reward_role_id VARCHAR(255)`);
-    await db.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS claimed_by_id VARCHAR(255)`);
-    console.log('✅ Database schema updated (Ticket Features: Claim/Reward/Dashboard).');
-  } catch (e) {
-    console.error('Schema update error:', e);
-  }
+// Seed the shop if empty
+await seedShop();
 
-  // Initial Dashboard Update
-  // Initial Dashboard Update for all guilds that have config
-  client.guilds.cache.forEach(guild => updateTicketDashboard(guild));
+// Database Migrations (Auto-Add Columns for Advanced Ticket Features)
+try {
+  await db.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS claim_enabled BOOLEAN DEFAULT FALSE`);
+  await db.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS reward_role_id VARCHAR(255)`);
+  await db.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS claimed_by_id VARCHAR(255)`);
+  console.log('✅ Database schema updated (Ticket Features: Claim/Reward/Dashboard).');
+} catch (e) {
+  console.error('Schema update error:', e);
+}
 
-  // QOTD Scheduler
-  setInterval(async () => {
-    const now = new Date();
-    // Check if it's 00:00 UTC
-    if (now.getUTCHours() === 0 && now.getUTCMinutes() === 0) {
-      const dateStr = now.toISOString().split('T')[0];
+// Initial Dashboard Update
+// Initial Dashboard Update for all guilds that have config
+client.guilds.cache.forEach(guild => updateTicketDashboard(guild));
 
-      try {
-        // Check for question
-        const { rows } = await db.query('SELECT * FROM qotd_questions WHERE date = $1 AND posted = 0', [dateStr]);
-        if (rows.length > 0) {
-          const qotd = rows[0];
+// QOTD Scheduler
+setInterval(async () => {
+  const now = new Date();
+  // Check if it's 00:00 UTC
+  if (now.getUTCHours() === 0 && now.getUTCMinutes() === 0) {
+    const dateStr = now.toISOString().split('T')[0];
 
-          // Fetch settings
-          const { rows: settingsRows } = await db.query('SELECT * FROM qotd_settings');
-
-          for (const settings of settingsRows) {
-            const guild = client.guilds.cache.get(settings.guild_id);
-            if (!guild) continue;
-
-            const channel = guild.channels.cache.get(settings.channel_id);
-            if (channel && channel.isTextBased()) {
-              const rolePing = settings.role_id ? `<@&${settings.role_id}>` : '';
-
-              const embed = new EmbedBuilder()
-                .setTitle('❓ Question of the Day')
-                .setDescription(qotd.question)
-                .setColor('Gold')
-                .setFooter({ text: `Date: ${dateStr}` });
-
-              const msg = await channel.send({ content: rolePing, embeds: [embed] });
-
-              // Create Thread
-              await msg.startThread({
-                name: `QOTD: ${dateStr}`,
-                autoArchiveDuration: 1440
-              });
-
-              console.log(`✅ QOTD posted for ${dateStr} in ${guild.name}`);
-            }
-          }
-
-          // Mark as posted
-          await db.query('UPDATE qotd_questions SET posted = 1 WHERE id = $1', [qotd.id]);
-        }
-      } catch (err) {
-        console.error('Error in QOTD scheduler:', err);
-      }
-    }
-  }, 60 * 1000); // Check every minute
-
-  // Backup Cleanup Scheduler (Check every hour)
-  setInterval(async () => {
     try {
-      // Delete backups older than 7 days
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const { rowCount } = await safeQuery('DELETE FROM ticket_transcripts WHERE closed_at < $1', [sevenDaysAgo]);
-      if (rowCount > 0) {
-        console.log(`🗑️ Deleted ${rowCount} old ticket backups.`);
+      // Check for question
+      const { rows } = await db.query('SELECT * FROM qotd_questions WHERE date = $1 AND posted = 0', [dateStr]);
+      if (rows.length > 0) {
+        const qotd = rows[0];
+
+        // Fetch settings
+        const { rows: settingsRows } = await db.query('SELECT * FROM qotd_settings');
+
+        for (const settings of settingsRows) {
+          const guild = client.guilds.cache.get(settings.guild_id);
+          if (!guild) continue;
+
+          const channel = guild.channels.cache.get(settings.channel_id);
+          if (channel && channel.isTextBased()) {
+            const rolePing = settings.role_id ? `<@&${settings.role_id}>` : '';
+
+            const embed = new EmbedBuilder()
+              .setTitle('❓ Question of the Day')
+              .setDescription(qotd.question)
+              .setColor('Gold')
+              .setFooter({ text: `Date: ${dateStr}` });
+
+            const msg = await channel.send({ content: rolePing, embeds: [embed] });
+
+            // Create Thread
+            await msg.startThread({
+              name: `QOTD: ${dateStr}`,
+              autoArchiveDuration: 1440
+            });
+
+            console.log(`✅ QOTD posted for ${dateStr} in ${guild.name}`);
+          }
+        }
+
+        // Mark as posted
+        await db.query('UPDATE qotd_questions SET posted = 1 WHERE id = $1', [qotd.id]);
       }
     } catch (err) {
-      console.error('Error cleaning up backups:', err);
+      console.error('Error in QOTD scheduler:', err);
     }
-  }, 60 * 60 * 1000);
+  }
+}, 60 * 1000); // Check every minute
+
+// Backup Cleanup Scheduler (Check every hour)
+setInterval(async () => {
+  try {
+    // Delete backups older than 7 days
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const { rowCount } = await safeQuery('DELETE FROM ticket_transcripts WHERE closed_at < $1', [sevenDaysAgo]);
+    if (rowCount > 0) {
+      console.log(`🗑️ Deleted ${rowCount} old ticket backups.`);
+    }
+  } catch (err) {
+    console.error('Error cleaning up backups:', err);
+  }
+}, 60 * 60 * 1000);
 });
 
 /* Welcome Module Removed */
