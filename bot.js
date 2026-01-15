@@ -3350,7 +3350,7 @@ client.on('interactionCreate', async interaction => {
   } else if (interaction.isButton()) { // Handle Button Clicks
     // --- SETUP WIZARD HANDLERS ---
     if (interaction.customId === 'setup_close_btn') {
-      await interaction.message.delete();
+      await interaction.update({ content: '✅ Configuration closed.', embeds: [], components: [] });
 
     } else if (interaction.customId === 'setup_back_btn') {
       // Return to Main Menu
