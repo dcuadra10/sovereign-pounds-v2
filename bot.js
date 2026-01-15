@@ -440,27 +440,29 @@ client.once(Events.ClientReady, async () => {
       console.log(`Failed to fetch invites for guild ${guild.name}: ${err.message}`);
     }
   });
+
+  // Seed the shop if empty
+  await seedShop();
+
+  // Database Migrations (Auto-Add Columns for Advanced Ticket Features)
+  try {
+    await db.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS claim_enabled BOOLEAN DEFAULT FALSE`);
+    await db.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS reward_role_id VARCHAR(255)`);
+    await db.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS claimed_by_id VARCHAR(255)`);
+    console.log('✅ Database schema updated (Ticket Features: Claim/Reward/Dashboard).');
+  } catch (e) {
+    console.error('Schema update error:', e);
+  }
+
+  // Initial Dashboard Update
+  // Initial Dashboard Update for all guilds that have config
+  client.guilds.cache.forEach(guild => updateTicketDashboard(guild));
 });
 
 client.on(Events.GuildCreate, () => updateBotPresence());
 client.on(Events.GuildDelete, () => updateBotPresence());
 
-// Seed the shop if empty
-await seedShop();
 
-// Database Migrations (Auto-Add Columns for Advanced Ticket Features)
-try {
-  await db.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS claim_enabled BOOLEAN DEFAULT FALSE`);
-  await db.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS reward_role_id VARCHAR(255)`);
-  await db.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS claimed_by_id VARCHAR(255)`);
-  console.log('✅ Database schema updated (Ticket Features: Claim/Reward/Dashboard).');
-} catch (e) {
-  console.error('Schema update error:', e);
-}
-
-// Initial Dashboard Update
-// Initial Dashboard Update for all guilds that have config
-client.guilds.cache.forEach(guild => updateTicketDashboard(guild));
 
 // QOTD Scheduler
 setInterval(async () => {
