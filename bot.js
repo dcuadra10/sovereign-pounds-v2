@@ -528,7 +528,7 @@ setInterval(async () => {
     console.error('Error cleaning up backups:', err);
   }
 }, 60 * 60 * 1000);
-});
+
 
 /* Welcome Module Removed */
 
