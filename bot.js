@@ -2275,6 +2275,8 @@ client.on('interactionCreate', async interaction => {
         interaction.reply({ content: `❌ Transaction failed.`, ephemeral: true });
       }
     } else if (interaction.customId === 'ticket_select') {
+      await initiateTicketCreation(interaction, interaction.values[0]);
+    } else if (interaction.customId === 'ticket_select_legacy') {
       const catId = interaction.values[0];
       console.log(`[Ticket Select] User ${interaction.user.tag} selected category ID: ${catId}`);
       try {
@@ -3379,6 +3381,13 @@ client.on('interactionCreate', async interaction => {
       }, 5000);
     }
   } else if (interaction.isButton()) { // Handle Button Clicks
+    // --- TICKET CREATION BUTTONS ---
+    if (interaction.customId.startsWith('create_ticket_')) {
+      const catId = interaction.customId.replace('create_ticket_', '');
+      await initiateTicketCreation(interaction, catId);
+      return;
+    }
+
     // --- SETUP WIZARD HANDLERS ---
     if (interaction.customId === 'setup_close_btn') {
       await interaction.update({ content: '✅ Configuration closed.', embeds: [], components: [] });
@@ -3436,6 +3445,7 @@ client.on('interactionCreate', async interaction => {
         new ButtonBuilder().setCustomId('setup_tickets_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Primary).setEmoji('#️⃣'),
         new ButtonBuilder().setCustomId('setup_tickets_style_btn').setLabel('Switch Style').setStyle(ButtonStyle.Secondary).setEmoji('🔄'),
         new ButtonBuilder().setCustomId('setup_tickets_mode_btn').setLabel('Switch Mode').setStyle(ButtonStyle.Secondary).setEmoji('📦'),
+        new ButtonBuilder().setCustomId('setup_tickets_customize_btn').setLabel('Customize Panel').setStyle(ButtonStyle.Secondary).setEmoji('🎨'),
         new ButtonBuilder().setCustomId('setup_tickets_refresh_panel_btn').setLabel('Update Panel').setStyle(ButtonStyle.Success).setEmoji('🚀')
       );
 
@@ -3499,7 +3509,74 @@ client.on('interactionCreate', async interaction => {
     } else if (interaction.customId === 'setup_tickets_refresh_panel_btn') {
       await interaction.deferUpdate();
       await updateTicketDashboard(interaction.guild);
-      await interaction.followUp({ content: '✅ Ticket Dashboard updated!', ephemeral: true });
+      await sendTicketPanel(interaction.guild);
+      await interaction.followUp({ content: '✅ Ticket Dashboard & Panel updated!', ephemeral: true });
+
+    } else if (interaction.customId === 'setup_tickets_customize_btn') {
+      const { rows } = await safeQuery('SELECT ticket_panel_title, ticket_panel_description, ticket_panel_image_url, ticket_panel_thumbnail_url, ticket_panel_color FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = rows[0] || {};
+
+      const embed = new EmbedBuilder()
+        .setTitle('🎨 Ticket Panel Customization')
+        .setDescription(`Customize the appearance of your ticket panel.
+        
+        **Title:** ${config.ticket_panel_title || 'Default'}
+        **Description:** ${config.ticket_panel_description ? (config.ticket_panel_description.length > 50 ? config.ticket_panel_description.substring(0, 50) + '...' : config.ticket_panel_description) : 'Default'}
+        **Color:** ${config.ticket_panel_color || 'Default'}
+        **Image:** ${config.ticket_panel_image_url ? 'Set' : 'None'}
+        **Thumbnail:** ${config.ticket_panel_thumbnail_url ? 'Set' : 'None'}`)
+        .setColor(config.ticket_panel_color || 'Blue');
+
+      if (config.ticket_panel_image_url) embed.setImage(config.ticket_panel_image_url);
+      if (config.ticket_panel_thumbnail_url) embed.setThumbnail(config.ticket_panel_thumbnail_url);
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_tickets_set_title').setLabel('Set Title').setStyle(ButtonStyle.Secondary).setEmoji('📝'),
+        new ButtonBuilder().setCustomId('setup_tickets_set_desc').setLabel('Set Description').setStyle(ButtonStyle.Secondary).setEmoji('📄'),
+        new ButtonBuilder().setCustomId('setup_tickets_set_color').setLabel('Set Color').setStyle(ButtonStyle.Secondary).setEmoji('🎨')
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_tickets_set_image').setLabel('Set Image').setStyle(ButtonStyle.Secondary).setEmoji('🖼️'),
+        new ButtonBuilder().setCustomId('setup_tickets_set_thumb').setLabel('Set Thumbnail').setStyle(ButtonStyle.Secondary).setEmoji('📌'),
+        new ButtonBuilder().setCustomId('setup_tickets_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+
+      await interaction.update({ embeds: [embed], components: [row1, row2] });
+
+    } else if (interaction.customId === 'setup_tickets_set_title') {
+      const modal = new ModalBuilder().setCustomId('modal_setup_tickets_title').setTitle('Set Panel Title');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('title_input').setLabel('Title').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(256)
+      ));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId === 'setup_tickets_set_desc') {
+      const modal = new ModalBuilder().setCustomId('modal_setup_tickets_desc').setTitle('Set Panel Description');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('desc_input').setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(4000)
+      ));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId === 'setup_tickets_set_image') {
+      const modal = new ModalBuilder().setCustomId('modal_setup_tickets_image').setTitle('Set Panel Image');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('image_input').setLabel('Image URL').setStyle(TextInputStyle.Short).setPlaceholder('https://...').setRequired(false)
+      ));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId === 'setup_tickets_set_thumb') {
+      const modal = new ModalBuilder().setCustomId('modal_setup_tickets_thumb').setTitle('Set Panel Thumbnail');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('thumb_input').setLabel('Thumbnail URL').setStyle(TextInputStyle.Short).setPlaceholder('https://...').setRequired(false)
+      ));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId === 'setup_tickets_set_color') {
+      const modal = new ModalBuilder().setCustomId('modal_setup_tickets_color').setTitle('Set Panel Color');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('color_input').setLabel('Color').setStyle(TextInputStyle.Short).setPlaceholder('Hex (#FF0000) or Name (Blue)').setRequired(true)
+      ));
+      await interaction.showModal(modal);
 
     } else if (interaction.customId === 'setup_tickets_add_cat_btn') {
       const modal = new ModalBuilder().setCustomId('modal_add_ticket_cat').setTitle('Add Ticket Category');
@@ -4018,6 +4095,31 @@ ${logOptions.commands !== false ? '✅' : '❌'} Commands • ${logOptions.serve
           .setChannelTypes([ChannelType.GuildText])
       );
       await interaction.reply({ content: 'Select the channel for welcome messages:', components: [row], ephemeral: true });
+
+    } else if (interaction.customId === 'modal_setup_tickets_title') {
+      const title = interaction.fields.getTextInputValue('title_input');
+      await db.query('UPDATE guild_configs SET ticket_panel_title = $1 WHERE guild_id = $2', [title, interaction.guildId]);
+      await interaction.reply({ content: '✅ Title updated! Go back to "Customize Panel" to see changes.', ephemeral: true });
+
+    } else if (interaction.customId === 'modal_setup_tickets_desc') {
+      const desc = interaction.fields.getTextInputValue('desc_input');
+      await db.query('UPDATE guild_configs SET ticket_panel_description = $1 WHERE guild_id = $2', [desc, interaction.guildId]);
+      await interaction.reply({ content: '✅ Description updated! Go back to "Customize Panel" to see changes.', ephemeral: true });
+
+    } else if (interaction.customId === 'modal_setup_tickets_image') {
+      const image = interaction.fields.getTextInputValue('image_input');
+      await db.query('UPDATE guild_configs SET ticket_panel_image_url = $1 WHERE guild_id = $2', [image || null, interaction.guildId]);
+      await interaction.reply({ content: '✅ Image URL updated! Go back to "Customize Panel" to see changes.', ephemeral: true });
+
+    } else if (interaction.customId === 'modal_setup_tickets_thumb') {
+      const thumb = interaction.fields.getTextInputValue('thumb_input');
+      await db.query('UPDATE guild_configs SET ticket_panel_thumbnail_url = $1 WHERE guild_id = $2', [thumb || null, interaction.guildId]);
+      await interaction.reply({ content: '✅ Thumbnail URL updated! Go back to "Customize Panel" to see changes.', ephemeral: true });
+
+    } else if (interaction.customId === 'modal_setup_tickets_color') {
+      const color = interaction.fields.getTextInputValue('color_input');
+      await db.query('UPDATE guild_configs SET ticket_panel_color = $1 WHERE guild_id = $2', [color, interaction.guildId]);
+      await interaction.reply({ content: '✅ Color updated! Go back to "Customize Panel" to see changes.', ephemeral: true });
 
     } else if (interaction.customId === 'setup_welcome_msg_btn') {
       const { rows } = await safeQuery('SELECT welcome_message FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
@@ -5089,5 +5191,129 @@ async function addXp(guildId, userId, xpToAdd, channel = null) {
 
   } catch (err) {
     console.error('Error adding XP:', err);
+  }
+}
+
+async function initiateTicketCreation(interaction, catId) {
+  console.log(`[Ticket Create] User ${interaction.user.tag} selected category ID: ${catId}`);
+  try {
+    const { rows } = await safeQuery('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
+    if (rows.length === 0) {
+      return interaction.reply({ content: 'Category not found.', ephemeral: true });
+    }
+
+    const category = rows[0];
+    let parsedQs = category.form_questions;
+    if (typeof parsedQs === 'string') try { parsedQs = JSON.parse(parsedQs); } catch (e) {
+      console.error('[Ticket Create] Error parsing questions JSON:', e);
+    }
+    if (!Array.isArray(parsedQs)) parsedQs = [];
+
+    if (parsedQs.length === 0) parsedQs = ['Please describe your request:'];
+
+    // Initialize session
+    const totalPages = Math.ceil(parsedQs.length / 5);
+    ticketCreationSessions.set(interaction.user.id, {
+      catId: catId,
+      questions: parsedQs,
+      answers: [],
+      totalPages: totalPages
+    });
+
+    // Show first modal (Page 0)
+    const modal = new ModalBuilder()
+      .setCustomId(`modal_ticket_submit_${catId}_0`)
+      .setTitle(`Open Ticket: ${category.name.substring(0, 45)}`);
+
+    parsedQs.slice(0, 5).forEach((q, i) => {
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId(`q_${i}`)
+          .setLabel(q.length > 45 ? q.substring(0, 42) + '...' : q)
+          .setPlaceholder(q.substring(0, 100))
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+      ));
+    });
+
+    await interaction.showModal(modal);
+    try {
+      if (interaction.message) await interaction.message.edit({ components: interaction.message.components });
+    } catch (e) { }
+
+  } catch (err) {
+    console.error('[Ticket Create] Error opening form:', err);
+  }
+}
+
+// Function to generate the user-facing Ticket Panel
+async function sendTicketPanel(guild) {
+  try {
+    const { rows: configRows } = await db.query('SELECT * FROM guild_configs WHERE guild_id = $1', [guild.id]);
+    const config = configRows[0];
+    if (!config || !config.ticket_dashboard_channel_id) return;
+
+    const channel = guild.channels.cache.get(config.ticket_dashboard_channel_id);
+    if (!channel) return;
+
+    const { rows: categories } = await db.query('SELECT * FROM ticket_categories WHERE guild_id = $1 ORDER BY id ASC', [guild.id]);
+
+    // Default Values
+    const title = config.ticket_panel_title || '🎫 Support Tickets';
+    const description = config.ticket_panel_description || 'Click a button below to open a ticket for support.';
+    const color = config.ticket_panel_color || 'Blue';
+
+    const embed = new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(description)
+      .setColor(color);
+
+    if (config.ticket_panel_image_url) embed.setImage(config.ticket_panel_image_url);
+    if (config.ticket_panel_thumbnail_url) embed.setThumbnail(config.ticket_panel_thumbnail_url);
+
+    const components = [];
+
+    if (config.ticket_panel_type === 'dropdown') {
+      const select = new StringSelectMenuBuilder()
+        .setCustomId('ticket_select')
+        .setPlaceholder('Select a category to open a ticket')
+        .addOptions(categories.map(c => ({
+          label: c.name,
+          value: c.id.toString(),
+          emoji: c.emoji,
+          description: `Open a ${c.name} ticket`
+        })));
+      components.push(new ActionRowBuilder().addComponents(select));
+    } else {
+      // Buttons (max 5 rows of 5 buttons)
+      let currentRow = new ActionRowBuilder();
+      categories.forEach((cat) => {
+        if (currentRow.components.length >= 5) {
+          components.push(currentRow);
+          currentRow = new ActionRowBuilder();
+        }
+        currentRow.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`create_ticket_${cat.id}`)
+            .setLabel(cat.name)
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji(cat.emoji)
+        );
+      });
+      if (currentRow.components.length > 0) components.push(currentRow);
+    }
+
+    // Find existing panel to edit
+    const messages = await channel.messages.fetch({ limit: 10 });
+    const existingPanel = messages.find(m => m.author.id === client.user.id && m.components.length > 0 && m.embeds.length > 0 && m.embeds[0].title === title);
+
+    if (existingPanel) {
+      await existingPanel.edit({ embeds: [embed], components: components });
+    } else {
+      await channel.send({ embeds: [embed], components: components });
+    }
+
+  } catch (err) {
+    console.error('Error sending ticket panel:', err);
   }
 }

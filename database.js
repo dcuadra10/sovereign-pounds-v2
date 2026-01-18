@@ -419,6 +419,11 @@ async function initializeDatabase() {
       await client.query("ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS ticket_mode TEXT DEFAULT 'threads'");
       await client.query("ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS ticket_parent_id TEXT");
       await client.query(`ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS log_options ${isSqlite ? 'TEXT' : 'JSONB'}`);
+      await client.query("ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS ticket_panel_title TEXT");
+      await client.query("ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS ticket_panel_description TEXT");
+      await client.query("ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS ticket_panel_image_url TEXT");
+      await client.query("ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS ticket_panel_thumbnail_url TEXT");
+      await client.query("ALTER TABLE guild_configs ADD COLUMN IF NOT EXISTS ticket_panel_color TEXT");
     } catch (err) {
       console.log('Migration note (general config):', err.message);
     }
