@@ -3689,12 +3689,18 @@ client.on('interactionCreate', async interaction => {
       await interaction.showModal(modal);
 
     } else if (interaction.customId === 'modal_add_ticket_cat') {
-      await interaction.deferUpdate();
+      console.log('[Modal] processing modal_add_ticket_cat');
       try {
+        await interaction.deferUpdate();
+        console.log('[Modal] deferred update');
+
         const name = interaction.fields.getTextInputValue('cat_name');
         const emoji = interaction.fields.getTextInputValue('cat_emoji');
+        console.log(`[Modal] Inputs: name=${name}, emoji=${emoji}`);
 
         await db.query('INSERT INTO ticket_categories (guild_id, name, emoji) VALUES ($1, $2, $3)', [interaction.guildId, name, emoji]);
+        console.log('[Modal] DB Insert success');
+
 
         const { rows: configRows } = await safeQuery('SELECT ticket_mode, ticket_parent_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
         const config = configRows[0] || {};
