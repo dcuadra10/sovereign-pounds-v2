@@ -1798,6 +1798,51 @@ client.on('interactionCreate', async interaction => {
         }
       }, 5000);
 
+    } else if (commandName === 'set-bot-profile') {
+      if (!hasAdminPermission(interaction.member)) {
+        return interaction.reply({ content: '❌ You do not have permission to use this command.', ephemeral: true });
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+
+      const newUsername = interaction.options.getString('username');
+      const newAvatar = interaction.options.getAttachment('avatar');
+
+      const updates = [];
+
+      try {
+        if (newUsername) {
+          await client.user.setUsername(newUsername);
+          updates.push(`✅ Username updated to **${newUsername}**`);
+        }
+
+        if (newAvatar) {
+          if (!newAvatar.contentType.startsWith('image/')) {
+            updates.push(`❌ Invalid file type for avatar. Please upload an image.`);
+          } else {
+            await client.user.setAvatar(newAvatar.url);
+            updates.push(`✅ Avatar updated successfully.`);
+          }
+        }
+
+        if (updates.length === 0) {
+          await interaction.editReply({ content: '⚠️ No changes were provided.' });
+        } else {
+          await interaction.editReply({ content: updates.join('\n') });
+        }
+
+      } catch (error) {
+        console.error('Error updating profile:', error);
+        // Discord rate limits these changes heavily (2 per hour)
+        if (error.code === 50035) {
+          await interaction.editReply({ content: `❌ Invalid form body. Ensure requirements are met.` });
+        } else if (error.status === 429) {
+          await interaction.editReply({ content: `❌ You are being rate limited. Discord only allows changing username/avatar 2 times per hour.` });
+        } else {
+          await interaction.editReply({ content: `❌ An error occurred: ${error.message}` });
+        }
+      }
+
     } else if (commandName === 'add-user') {
       if (!interaction.channel.isThread()) {
         return await interaction.reply({ content: '❌ This command can only be used in active ticket threads.', ephemeral: true });

@@ -5,6 +5,18 @@ require('dotenv').config();
 
 const commands = [
   new SlashCommandBuilder()
+    .setName('set-bot-profile')
+    .setDescription('Admin: Change the bot\'s username or avatar.')
+    .addStringOption(option =>
+      option.setName('username')
+        .setDescription('New username for the bot')
+        .setRequired(false))
+    .addAttachmentOption(option =>
+      option.setName('avatar')
+        .setDescription('New avatar image for the bot')
+        .setRequired(false)),
+
+  new SlashCommandBuilder()
     .setName('balance')
     .setDescription('Check your Sovereign Pounds balance and inventory'),
 
