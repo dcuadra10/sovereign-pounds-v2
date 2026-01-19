@@ -3421,98 +3421,219 @@ client.on('interactionCreate', async interaction => {
 
       // --- TICKETS WIZARD ---
     } else if (interaction.customId === 'setup_tickets_btn') {
-      const { rows: configRows } = await safeQuery('SELECT ticket_dashboard_channel_id, ticket_panel_type, ticket_mode, ticket_parent_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const { rows: configRows } = await safeQuery('SELECT ticket_mode, ticket_parent_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const config = configRows[0] || {};
       const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1', [interaction.guildId]);
 
-      const categoriesList = catRows.length > 0 ? catRows.map(c => `${c.emoji} **${c.name}** (<@&${c.staff_role_id}>)`).join('\n') : 'No categories configured.';
+      const categoriesList = catRows.length > 0 ? catRows.map(c => `${c.emoji} **${c.name}**`).join('\n') : 'No categories configured.';
       const ticketMode = config.ticket_mode === 'channels' ? 'Channels 📁' : 'Threads 🧵';
 
       const embed = new EmbedBuilder()
-        .setTitle('🎫 Ticket System Configuration')
-        .setDescription(`Configure your ticket panel, style, and categories.
+        .setTitle('🎫 Ticket System Dashboard')
+        .setDescription(`Manage your ticket system settings and panels.
         
-        **Dashboard Channel:** ${config.ticket_dashboard_channel_id ? `<#${config.ticket_dashboard_channel_id}>` : 'Not Set'}
-        **Panel Style:** ${config.ticket_panel_type === 'dropdown' ? 'Dropdown Menu 🔽' : 'Buttons 🔘'}
         **Ticket Mode:** ${ticketMode}
         ${config.ticket_mode === 'channels' ? `**Ticket Category:** ${config.ticket_parent_id ? `<#${config.ticket_parent_id}>` : 'Not Set'}` : ''}
         
-        **Categories:**
+        **Global Categories:**
         ${categoriesList}`)
         .setColor('Blue');
 
       const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('setup_tickets_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Primary).setEmoji('#️⃣'),
-        new ButtonBuilder().setCustomId('setup_tickets_style_btn').setLabel('Switch Style').setStyle(ButtonStyle.Secondary).setEmoji('🔄'),
+        new ButtonBuilder().setCustomId('setup_tickets_panels_btn').setLabel('Manage Panels').setStyle(ButtonStyle.Primary).setEmoji('🖥️'),
         new ButtonBuilder().setCustomId('setup_tickets_mode_btn').setLabel('Switch Mode').setStyle(ButtonStyle.Secondary).setEmoji('📦'),
-        new ButtonBuilder().setCustomId('setup_tickets_customize_btn').setLabel('Customize Panel').setStyle(ButtonStyle.Secondary).setEmoji('🎨'),
-        new ButtonBuilder().setCustomId('setup_tickets_refresh_panel_btn').setLabel('Update Panel').setStyle(ButtonStyle.Success).setEmoji('🚀')
+        new ButtonBuilder().setCustomId('setup_tickets_parent_btn').setLabel('Set Parent Category').setStyle(ButtonStyle.Secondary).setEmoji('📂').setDisabled(config.ticket_mode !== 'channels'),
       );
 
       const row2 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('setup_tickets_add_cat_btn').setLabel('Add Category').setStyle(ButtonStyle.Success).setEmoji('➕'),
         new ButtonBuilder().setCustomId('setup_tickets_del_cat_btn').setLabel('Remove Category').setStyle(ButtonStyle.Danger).setEmoji('🗑️'),
-        new ButtonBuilder().setCustomId('setup_tickets_parent_btn').setLabel('Set Parent Category').setStyle(ButtonStyle.Secondary).setEmoji('📂').setDisabled(config.ticket_mode !== 'channels'),
         new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
       );
 
       await interaction.update({ embeds: [embed], components: [row1, row2] });
 
-    } else if (interaction.customId === 'setup_tickets_style_btn') {
-      await db.query(`
-        INSERT INTO guild_configs (guild_id, ticket_panel_type) VALUES ($1, 'dropdown') 
-        ON CONFLICT (guild_id) DO UPDATE SET ticket_panel_type = CASE WHEN guild_configs.ticket_panel_type = 'buttons' THEN 'dropdown' ELSE 'buttons' END
-      `, [interaction.guildId]);
-
-      // Refresh Ticket Menu (recurse logic)
-      const { rows: configRows } = await safeQuery('SELECT ticket_dashboard_channel_id, ticket_panel_type FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
-      const config = configRows[0] || {};
-      const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1', [interaction.guildId]);
-
-      const categoriesList = catRows.length > 0 ? catRows.map(c => `${c.emoji} **${c.name}** (<@&${c.staff_role_id}>)`).join('\n') : 'No categories configured.';
+    } else if (interaction.customId === 'setup_tickets_panels_btn') {
+      // List Panels
+      const { rows: panels } = await safeQuery('SELECT * FROM ticket_panels_v2 WHERE guild_id = $1 ORDER BY id ASC', [interaction.guildId]);
 
       const embed = new EmbedBuilder()
-        .setTitle('🎫 Ticket System Configuration')
-        .setDescription(`Configure your ticket panel, style, and categories.
-        
-        **Dashboard Channel:** ${config.ticket_dashboard_channel_id ? `<#${config.ticket_dashboard_channel_id}>` : 'Not Set'}
-        **Panel Style:** ${config.ticket_panel_type === 'dropdown' ? 'Dropdown Menu 🔽' : 'Buttons 🔘'}
-        
-        **Categories:**
-        ${categoriesList}`)
+        .setTitle('🖥️ Ticket Panels')
+        .setDescription(`You have **${panels.length}** active ticket panels.\nUse the menu below to edit an existing panel or create a new one.`)
         .setColor('Blue');
 
-      // Re-use rows logic from above (duplicated for simplicity in this edit)
-      const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('setup_tickets_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Primary).setEmoji('#️⃣'),
-        new ButtonBuilder().setCustomId('setup_tickets_style_btn').setLabel('Switch Style').setStyle(ButtonStyle.Secondary).setEmoji('🔄'),
-        new ButtonBuilder().setCustomId('setup_tickets_refresh_panel_btn').setLabel('Update Panel').setStyle(ButtonStyle.Success).setEmoji('🚀')
-      );
-      const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('setup_tickets_add_cat_btn').setLabel('Add Category').setStyle(ButtonStyle.Success).setEmoji('➕'),
-        new ButtonBuilder().setCustomId('setup_tickets_del_cat_btn').setLabel('Remove Category').setStyle(ButtonStyle.Danger).setEmoji('🗑️'),
-        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
-      );
+      const components = [];
 
-      await interaction.update({ embeds: [embed], components: [row1, row2] });
+      if (panels.length > 0) {
+        const options = panels.map(p => ({
+          label: p.title || `Panel #${p.id}`,
+          description: `Channel: ${p.channel_id ? `<#${p.channel_id}>` : 'Not Set'} | Style: ${p.button_style}`,
+          value: p.id.toString(),
+          emoji: '📝'
+        }));
 
-    } else if (interaction.customId === 'setup_tickets_channel_btn') {
-      // Show Channel Select
+        const selectRow = new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('select_panel_edit')
+            .setPlaceholder('Select a panel to manage')
+            .addOptions(options)
+        );
+        components.push(selectRow);
+      }
+
+      const btnRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_panel_create').setLabel('Create New Panel').setStyle(ButtonStyle.Success).setEmoji('➕'),
+        new ButtonBuilder().setCustomId('setup_tickets_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+      components.push(btnRow);
+
+      await interaction.update({ embeds: [embed], components: components });
+
+    } else if (interaction.customId === 'setup_panel_create') {
+      // Create default panel
+      await db.query(`INSERT INTO ticket_panels_v2 (guild_id, title, description, button_style) VALUES ($1, '🎫 Support Tickets', 'Open a ticket below', 'buttons')`, [interaction.guildId]);
+      // Refresh list
+      // Reuse logic from setup_tickets_panels_btn
+      // Or just redirect to editing the new panel?
+      // Let's redirect to list for simplicity
+      const { rows: panels } = await safeQuery('SELECT * FROM ticket_panels_v2 WHERE guild_id = $1 ORDER BY id ASC', [interaction.guildId]);
+      const embed = new EmbedBuilder()
+        .setTitle('🖥️ Ticket Panels')
+        .setDescription(`Panel Created! You have **${panels.length}** active ticket panels.`)
+        .setColor('Green');
+
+      const components = [];
+      if (panels.length > 0) {
+        const options = panels.map(p => ({
+          label: p.title || `Panel #${p.id}`,
+          description: `Channel: ${p.channel_id ? `<#${p.channel_id}>` : 'Not Set'} | Style: ${p.button_style}`,
+          value: p.id.toString(),
+          emoji: '📝'
+        }));
+        const selectRow = new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('select_panel_edit')
+            .setPlaceholder('Select a panel to manage')
+            .addOptions(options)
+        );
+        components.push(selectRow);
+      }
+      const btnRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_panel_create').setLabel('Create New Panel').setStyle(ButtonStyle.Success).setEmoji('➕'),
+        new ButtonBuilder().setCustomId('setup_tickets_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+      components.push(btnRow);
+      await interaction.update({ embeds: [embed], components: components });
+
+    } else if (interaction.customId === 'select_panel_edit') {
+      const panelId = interaction.values[0];
+      // Redirect to Edit Handler (Simulated)
+      // We need to call a function or just emit logic. 
+      // Logic below for setup_panel_edit_
+      // But we need to Change the customId logic to support extraction.
+      // Let's manually trigger the logic:
+      await handlePanelEdit(interaction, panelId);
+
+    } else if (interaction.customId.startsWith('setup_panel_edit_')) {
+      const panelId = interaction.customId.replace('setup_panel_edit_', '');
+      await handlePanelEdit(interaction, panelId);
+
+    } else if (interaction.customId.startsWith('panel_refresh_')) {
+      const panelId = interaction.customId.replace('panel_refresh_', '');
+      await sendTicketPanel(interaction.guild, panelId);
+      await interaction.reply({ content: '✅ Panel message updated!', ephemeral: true });
+
+    } else if (interaction.customId.startsWith('panel_delete_')) {
+      const panelId = interaction.customId.replace('panel_delete_', '');
+      await db.query('DELETE FROM ticket_panels_v2 WHERE id = $1', [panelId]);
+      await interaction.update({ content: '🗑️ Panel deleted.', embeds: [], components: [] });
+      return; // Exit
+
+
+    } else if (interaction.customId.startsWith('panel_set_channel_')) {
+      const panelId = interaction.customId.replace('panel_set_channel_', '');
       const row = new ActionRowBuilder().addComponents(
         new ChannelSelectMenuBuilder()
-          .setCustomId('select_ticket_channel')
-          .setPlaceholder('Select Dashboard Channel')
+          .setCustomId(`select_panel_channel_${panelId}`)
+          .setPlaceholder('Select Panel Channel')
           .setChannelTypes([ChannelType.GuildText])
       );
-      await interaction.reply({ content: 'Select the channel where the ticket panel will be sent:', components: [row], ephemeral: true });
+      await interaction.reply({ content: 'Select the channel where this panel will be sent:', components: [row], ephemeral: true });
 
-    } else if (interaction.customId === 'setup_tickets_refresh_panel_btn') {
-      await interaction.deferUpdate();
-      await updateTicketDashboard(interaction.guild);
-      await sendTicketPanel(interaction.guild);
-      await interaction.followUp({ content: '✅ Ticket Dashboard & Panel updated!', ephemeral: true });
+    } else if (interaction.customId.startsWith('select_panel_channel_')) {
+      const panelId = interaction.customId.replace('select_panel_channel_', '');
+      const channelId = interaction.values[0];
+      await db.query('UPDATE ticket_panels_v2 SET channel_id = $1 WHERE id = $2', [channelId, panelId]);
+      await interaction.update({ content: `✅ Panel channel set to <#${channelId}>.`, components: [] });
 
-    } else if (interaction.customId === 'setup_tickets_customize_btn') {
+    } else if (interaction.customId.startsWith('panel_toggle_style_')) {
+      const panelId = interaction.customId.replace('panel_toggle_style_', '');
+      await db.query(`UPDATE ticket_panels_v2 SET button_style = CASE WHEN button_style = 'buttons' THEN 'dropdown' ELSE 'buttons' END WHERE id = $1`, [panelId]);
+      await handlePanelEdit(interaction, panelId);
+
+    } else if (interaction.customId.startsWith('panel_categories_')) {
+      const panelId = interaction.customId.replace('panel_categories_', '');
+      await handlePanelCategories(interaction, panelId);
+
+    } else if (interaction.customId.startsWith('panel_cat_toggle_')) {
+      const [_, , , panelId, catId] = interaction.customId.split('_');
+      const { rows } = await safeQuery('SELECT panel_id FROM ticket_categories WHERE id = $1', [catId]);
+      const currentPanel = rows[0]?.panel_id;
+
+      if (currentPanel == panelId) {
+        await db.query('UPDATE ticket_categories SET panel_id = NULL WHERE id = $1', [catId]);
+      } else {
+        await db.query('UPDATE ticket_categories SET panel_id = $1 WHERE id = $2', [panelId, catId]);
+      }
+      await handlePanelCategories(interaction, panelId);
+
+    } else if (interaction.customId.startsWith('panel_cat_back_')) {
+      const panelId = interaction.customId.replace('panel_cat_back_', '');
+      await handlePanelEdit(interaction, panelId);
+
+    } else if (interaction.customId.startsWith('panel_set_title_')) {
+      const panelId = interaction.customId.replace('panel_set_title_', '');
+      const modal = new ModalBuilder().setCustomId(`modal_panel_title_${panelId}`).setTitle('Set Panel Title');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('val').setLabel('Title').setStyle(TextInputStyle.Short).setRequired(true)));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId.startsWith('panel_set_desc_')) {
+      const panelId = interaction.customId.replace('panel_set_desc_', '');
+      const modal = new ModalBuilder().setCustomId(`modal_panel_desc_${panelId}`).setTitle('Set Panel Description');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('val').setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(true)));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId.startsWith('panel_set_color_')) {
+      const panelId = interaction.customId.replace('panel_set_color_', '');
+      const modal = new ModalBuilder().setCustomId(`modal_panel_color_${panelId}`).setTitle('Set Panel Color');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('val').setLabel('Color').setStyle(TextInputStyle.Short).setPlaceholder('#HEX or Name').setRequired(true)));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId.startsWith('panel_set_image_')) {
+      const panelId = interaction.customId.replace('panel_set_image_', '');
+      const modal = new ModalBuilder().setCustomId(`modal_panel_image_${panelId}`).setTitle('Set Panel Image');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('val').setLabel('Image URL').setStyle(TextInputStyle.Short).setRequired(false)));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId.startsWith('panel_set_thumb_')) {
+      const panelId = interaction.customId.replace('panel_set_thumb_', '');
+      const modal = new ModalBuilder().setCustomId(`modal_panel_thumb_${panelId}`).setTitle('Set Panel Thumbnail');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('val').setLabel('Thumbnail URL').setStyle(TextInputStyle.Short).setRequired(false)));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId.startsWith('modal_panel_')) {
+      const parts = interaction.customId.split('_');
+      const field = parts[2];
+      const panelId = parts[3];
+      const val = interaction.fields.getTextInputValue('val');
+      const colMap = { 'title': 'title', 'desc': 'description', 'color': 'color', 'image': 'image_url', 'thumb': 'thumbnail_url' };
+      const col = colMap[field];
+      if (col) {
+        await db.query(`UPDATE ticket_panels_v2 SET ${col} = $1 WHERE id = $2`, [val || null, panelId]);
+        await interaction.reply({ content: `✅ ${field} updated!`, ephemeral: true });
+      }
+
+    } else if (interaction.customId === 'setup_tickets_add_cat_btn') {
       const { rows } = await safeQuery('SELECT ticket_panel_title, ticket_panel_description, ticket_panel_image_url, ticket_panel_thumbnail_url, ticket_panel_color FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
       const config = rows[0] || {};
 
@@ -3597,6 +3718,45 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ content: 'Select category to remove:', components: [row], ephemeral: true });
 
     } else if (interaction.customId === 'setup_tickets_mode_btn') {
+      await db.query(`
+        INSERT INTO guild_configs (guild_id, ticket_mode) VALUES ($1, 'channels') 
+        ON CONFLICT (guild_id) DO UPDATE SET ticket_mode = CASE WHEN COALESCE(guild_configs.ticket_mode, 'threads') = 'threads' THEN 'channels' ELSE 'threads' END
+      `, [interaction.guildId]);
+
+      // Refresh Main Dashboard
+      // We can manually trigger the dashboard refresh by recursively calling the logic for 'setup_tickets_btn'
+      // But since we can't easily recurse without extracting functions, we will just copy the dashboard logic basic update.
+      // Actually, let's just update the interaction properties to simulate a click and call a shared update function if we had one.
+      // For now, I'll assume the user presses it and we just update the embed.
+
+      const { rows: configRows } = await safeQuery('SELECT ticket_mode, ticket_parent_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
+      const config = configRows[0] || {};
+      const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1', [interaction.guildId]);
+      const categoriesList = catRows.length > 0 ? catRows.map(c => `${c.emoji} **${c.name}**`).join('\n') : 'No categories configured.';
+      const ticketMode = config.ticket_mode === 'channels' ? 'Channels 📁' : 'Threads 🧵';
+
+      const embed = new EmbedBuilder()
+        .setTitle('🎫 Ticket System Dashboard')
+        .setDescription(`Manage your ticket system settings and panels.
+        
+        **Ticket Mode:** ${ticketMode}
+        ${config.ticket_mode === 'channels' ? `**Ticket Category:** ${config.ticket_parent_id ? `<#${config.ticket_parent_id}>` : 'Not Set'}` : ''}
+        
+        **Global Categories:**
+        ${categoriesList}`)
+        .setColor('Blue');
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_tickets_panels_btn').setLabel('Manage Panels').setStyle(ButtonStyle.Primary).setEmoji('🖥️'),
+        new ButtonBuilder().setCustomId('setup_tickets_mode_btn').setLabel('Switch Mode').setStyle(ButtonStyle.Secondary).setEmoji('📦'),
+        new ButtonBuilder().setCustomId('setup_tickets_parent_btn').setLabel('Set Parent Category').setStyle(ButtonStyle.Secondary).setEmoji('📂').setDisabled(config.ticket_mode !== 'channels'),
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup_tickets_add_cat_btn').setLabel('Add Category').setStyle(ButtonStyle.Success).setEmoji('➕'),
+        new ButtonBuilder().setCustomId('setup_tickets_del_cat_btn').setLabel('Remove Category').setStyle(ButtonStyle.Danger).setEmoji('🗑️'),
+        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+      );
+      await interaction.update({ embeds: [embed], components: [row1, row2] });
       // Toggle between 'threads' and 'channels'
       await db.query(`
         INSERT INTO guild_configs (guild_id, ticket_mode) VALUES ($1, 'channels') 
@@ -3645,9 +3805,100 @@ client.on('interactionCreate', async interaction => {
           .setPlaceholder('Select Parent Category')
           .setChannelTypes([ChannelType.GuildCategory])
       );
-      await interaction.reply({ content: 'Select the Discord category where new ticket channels will be created:', components: [row], ephemeral: true });
+      await interaction.reply({ content: 'Select the channel where new ticket channels will be created:', components: [row], ephemeral: true });
 
-    } else if (interaction.customId.startsWith('ticket_backup_page_')) {
+    } else if (interaction.customId.startsWith('panel_set_channel_')) {
+      const panelId = interaction.customId.replace('panel_set_channel_', '');
+      const row = new ActionRowBuilder().addComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId(`select_panel_channel_${panelId}`)
+          .setPlaceholder('Select Panel Channel')
+          .setChannelTypes([ChannelType.GuildText])
+      );
+      await interaction.reply({ content: 'Select the channel where this panel will be sent:', components: [row], ephemeral: true });
+
+    } else if (interaction.customId.startsWith('select_panel_channel_')) {
+      const panelId = interaction.customId.replace('select_panel_channel_', '');
+      const channelId = interaction.values[0];
+      await db.query('UPDATE ticket_panels_v2 SET channel_id = $1 WHERE id = $2', [channelId, panelId]);
+      await interaction.update({ content: `✅ Panel channel set to <#${channelId}>.`, components: [] });
+
+    } else if (interaction.customId.startsWith('panel_toggle_style_')) {
+      const panelId = interaction.customId.replace('panel_toggle_style_', '');
+      await db.query(`UPDATE ticket_panels_v2 SET button_style = CASE WHEN button_style = 'buttons' THEN 'dropdown' ELSE 'buttons' END WHERE id = $1`, [panelId]);
+      // Refresh
+      await handlePanelEdit(interaction, panelId);
+
+    } else if (interaction.customId.startsWith('panel_categories_')) {
+      const panelId = interaction.customId.replace('panel_categories_', '');
+      await handlePanelCategories(interaction, panelId);
+
+    } else if (interaction.customId.startsWith('panel_cat_toggle_')) {
+      const [_, , , panelId, catId] = interaction.customId.split('_');
+      // panel_cat_toggle_{panelId}_{catId}
+
+      // Toggle: check if currently linked.
+      const { rows } = await safeQuery('SELECT panel_id FROM ticket_categories WHERE id = $1', [catId]);
+      const currentPanel = rows[0]?.panel_id;
+
+      if (currentPanel == panelId) {
+        // Unlink
+        await db.query('UPDATE ticket_categories SET panel_id = NULL WHERE id = $1', [catId]);
+      } else {
+        // Link
+        await db.query('UPDATE ticket_categories SET panel_id = $1 WHERE id = $2', [panelId, catId]);
+      }
+      await handlePanelCategories(interaction, panelId);
+
+    } else if (interaction.customId.startsWith('panel_cat_back_')) {
+      const panelId = interaction.customId.replace('panel_cat_back_', '');
+      await handlePanelEdit(interaction, panelId);
+
+    } else if (interaction.customId.startsWith('panel_set_title_')) {
+      const panelId = interaction.customId.replace('panel_set_title_', '');
+      const modal = new ModalBuilder().setCustomId(`modal_panel_title_${panelId}`).setTitle('Set Panel Title');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('val').setLabel('Title').setStyle(TextInputStyle.Short).setRequired(true)));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId.startsWith('panel_set_desc_')) {
+      const panelId = interaction.customId.replace('panel_set_desc_', '');
+      const modal = new ModalBuilder().setCustomId(`modal_panel_desc_${panelId}`).setTitle('Set Panel Description');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('val').setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(true)));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId.startsWith('panel_set_color_')) {
+      const panelId = interaction.customId.replace('panel_set_color_', '');
+      const modal = new ModalBuilder().setCustomId(`modal_panel_color_${panelId}`).setTitle('Set Panel Color');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('val').setLabel('Color').setStyle(TextInputStyle.Short).setPlaceholder('#HEX or Name').setRequired(true)));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId.startsWith('panel_set_image_')) {
+      const panelId = interaction.customId.replace('panel_set_image_', '');
+      const modal = new ModalBuilder().setCustomId(`modal_panel_image_${panelId}`).setTitle('Set Panel Image');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('val').setLabel('Image URL').setStyle(TextInputStyle.Short).setRequired(false)));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId.startsWith('panel_set_thumb_')) {
+      const panelId = interaction.customId.replace('panel_set_thumb_', '');
+      const modal = new ModalBuilder().setCustomId(`modal_panel_thumb_${panelId}`).setTitle('Set Panel Thumbnail');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('val').setLabel('Thumbnail URL').setStyle(TextInputStyle.Short).setRequired(false)));
+      await interaction.showModal(modal);
+
+    } else if (interaction.customId.startsWith('modal_panel_')) {
+      // Generic modal handler for panel edits
+      const parts = interaction.customId.split('_'); // modal, panel, [field], [id]
+      const field = parts[2]; // title, desc, color, image, thumb
+      const panelId = parts[3];
+      const val = interaction.fields.getTextInputValue('val');
+
+      // Map field to db column
+      const colMap = { 'title': 'title', 'desc': 'description', 'color': 'color', 'image': 'image_url', 'thumb': 'thumbnail_url' };
+      const col = colMap[field];
+      if (col) {
+        await db.query(`UPDATE ticket_panels_v2 SET ${col} = $1 WHERE id = $2`, [val || null, panelId]);
+        await interaction.reply({ content: `✅ ${field} updated!`, ephemeral: true });
+      }
+
       const page = parseInt(interaction.customId.split('_')[3]);
       if (isNaN(page) || page < 0) return;
 
@@ -5247,33 +5498,35 @@ async function initiateTicketCreation(interaction, catId) {
 }
 
 // Function to generate the user-facing Ticket Panel
-async function sendTicketPanel(guild) {
+async function sendTicketPanel(guild, panelId) {
   try {
-    const { rows: configRows } = await db.query('SELECT * FROM guild_configs WHERE guild_id = $1', [guild.id]);
-    const config = configRows[0];
-    if (!config || !config.ticket_dashboard_channel_id) return;
+    const { rows: panelRows } = await db.query('SELECT * FROM ticket_panels_v2 WHERE id = $1', [panelId]);
+    if (panelRows.length === 0) return;
+    const panel = panelRows[0];
 
-    const channel = guild.channels.cache.get(config.ticket_dashboard_channel_id);
+    if (!panel.channel_id) return;
+    const channel = guild.channels.cache.get(panel.channel_id);
     if (!channel) return;
 
-    const { rows: categories } = await db.query('SELECT * FROM ticket_categories WHERE guild_id = $1 ORDER BY id ASC', [guild.id]);
+    // Get categories for THIS panel
+    const { rows: categories } = await db.query('SELECT * FROM ticket_categories WHERE guild_id = $1 AND panel_id = $2 ORDER BY id ASC', [guild.id, panelId]);
 
     // Default Values
-    const title = config.ticket_panel_title || '🎫 Support Tickets';
-    const description = config.ticket_panel_description || 'Click a button below to open a ticket for support.';
-    const color = config.ticket_panel_color || 'Blue';
+    const title = panel.title || '🎫 Support Tickets';
+    const description = panel.description || 'Click a button below to open a ticket for support.';
+    const color = panel.color || 'Blue';
 
     const embed = new EmbedBuilder()
       .setTitle(title)
       .setDescription(description)
       .setColor(color);
 
-    if (config.ticket_panel_image_url) embed.setImage(config.ticket_panel_image_url);
-    if (config.ticket_panel_thumbnail_url) embed.setThumbnail(config.ticket_panel_thumbnail_url);
+    if (panel.image_url) embed.setImage(panel.image_url);
+    if (panel.thumbnail_url) embed.setThumbnail(panel.thumbnail_url);
 
     const components = [];
 
-    if (config.ticket_panel_type === 'dropdown') {
+    if (panel.button_style === 'dropdown') {
       const select = new StringSelectMenuBuilder()
         .setCustomId('ticket_select')
         .setPlaceholder('Select a category to open a ticket')
@@ -5303,14 +5556,21 @@ async function sendTicketPanel(guild) {
       if (currentRow.components.length > 0) components.push(currentRow);
     }
 
-    // Find existing panel to edit
-    const messages = await channel.messages.fetch({ limit: 10 });
-    const existingPanel = messages.find(m => m.author.id === client.user.id && m.components.length > 0 && m.embeds.length > 0 && m.embeds[0].title === title);
+    // Send or Edit
+    // If we stored message_id, try to fetch it
+    let messageToEdit = null;
+    if (panel.message_id) {
+      try {
+        messageToEdit = await channel.messages.fetch(panel.message_id);
+      } catch (e) { /* Message deleted */ }
+    }
 
-    if (existingPanel) {
-      await existingPanel.edit({ embeds: [embed], components: components });
+    if (messageToEdit) {
+      await messageToEdit.edit({ embeds: [embed], components: components });
     } else {
-      await channel.send({ embeds: [embed], components: components });
+      const msg = await channel.send({ embeds: [embed], components: components });
+      // Update DB with new message ID
+      await db.query('UPDATE ticket_panels_v2 SET message_id = $1 WHERE id = $2', [msg.id, panelId]);
     }
 
   } catch (err) {
