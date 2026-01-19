@@ -3641,13 +3641,7 @@ client.on('interactionCreate', async interaction => {
       );
       await interaction.showModal(modal);
 
-    } else if (interaction.customId === 'setup_tickets_add_cat_btn') {
-      const modal = new ModalBuilder().setCustomId('modal_add_ticket_cat').setTitle('Add Ticket Category');
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_name').setLabel('Category Name').setStyle(TextInputStyle.Short).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_emoji').setLabel('Emoji').setStyle(TextInputStyle.Short).setPlaceholder('e.g. 🎫').setRequired(true))
-      );
-      await interaction.showModal(modal);
+
 
     } else if (interaction.customId === 'setup_tickets_del_cat_btn') {
       const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1', [interaction.guildId]);
@@ -3699,45 +3693,7 @@ client.on('interactionCreate', async interaction => {
         new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
       );
       await interaction.update({ embeds: [embed], components: [row1, row2] });
-      // Toggle between 'threads' and 'channels'
-      await db.query(`
-        INSERT INTO guild_configs (guild_id, ticket_mode) VALUES ($1, 'channels') 
-        ON CONFLICT (guild_id) DO UPDATE SET ticket_mode = CASE WHEN COALESCE(guild_configs.ticket_mode, 'threads') = 'threads' THEN 'channels' ELSE 'threads' END
-      `, [interaction.guildId]);
 
-      // Refresh the menu by simulating clicking setup_tickets_btn
-      const { rows: configRows } = await safeQuery('SELECT ticket_dashboard_channel_id, ticket_panel_type, ticket_mode, ticket_parent_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
-      const config = configRows[0] || {};
-      const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1', [interaction.guildId]);
-      const categoriesList = catRows.length > 0 ? catRows.map(c => `${c.emoji} **${c.name}** (<@&${c.staff_role_id}>)`).join('\n') : 'No categories configured.';
-      const ticketMode = config.ticket_mode === 'channels' ? 'Channels 📁' : 'Threads 🧵';
-
-      const embed = new EmbedBuilder()
-        .setTitle('🎫 Ticket System Configuration')
-        .setDescription(`Configure your ticket panel, style, and categories.
-        
-        **Dashboard Channel:** ${config.ticket_dashboard_channel_id ? `<#${config.ticket_dashboard_channel_id}>` : 'Not Set'}
-        **Panel Style:** ${config.ticket_panel_type === 'dropdown' ? 'Dropdown Menu 🔽' : 'Buttons 🔘'}
-        **Ticket Mode:** ${ticketMode}
-        ${config.ticket_mode === 'channels' ? `**Ticket Category:** ${config.ticket_parent_id ? `<#${config.ticket_parent_id}>` : 'Not Set'}` : ''}
-        
-        **Categories:**
-        ${categoriesList}`)
-        .setColor('Blue');
-
-      const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('setup_tickets_channel_btn').setLabel('Set Channel').setStyle(ButtonStyle.Primary).setEmoji('#️⃣'),
-        new ButtonBuilder().setCustomId('setup_tickets_style_btn').setLabel('Switch Style').setStyle(ButtonStyle.Secondary).setEmoji('🔄'),
-        new ButtonBuilder().setCustomId('setup_tickets_mode_btn').setLabel('Switch Mode').setStyle(ButtonStyle.Secondary).setEmoji('📦'),
-        new ButtonBuilder().setCustomId('setup_tickets_refresh_panel_btn').setLabel('Update Panel').setStyle(ButtonStyle.Success).setEmoji('🚀')
-      );
-      const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('setup_tickets_add_cat_btn').setLabel('Add Category').setStyle(ButtonStyle.Success).setEmoji('➕'),
-        new ButtonBuilder().setCustomId('setup_tickets_del_cat_btn').setLabel('Remove Category').setStyle(ButtonStyle.Danger).setEmoji('🗑️'),
-        new ButtonBuilder().setCustomId('setup_tickets_parent_btn').setLabel('Set Parent Category').setStyle(ButtonStyle.Secondary).setEmoji('📂').setDisabled(config.ticket_mode !== 'channels'),
-        new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
-      );
-      await interaction.update({ embeds: [embed], components: [row1, row2] });
 
     } else if (interaction.customId === 'setup_tickets_parent_btn') {
       // Show Category channel select (for Discord category, not ticket category)
