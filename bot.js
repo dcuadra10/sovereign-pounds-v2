@@ -3690,18 +3690,19 @@ client.on('interactionCreate', async interaction => {
 
     } else if (interaction.customId === 'modal_add_ticket_cat') {
       console.log('[Modal] processing modal_add_ticket_cat');
-      try {
-        await interaction.deferUpdate();
-        console.log('[Modal] deferred update');
+      // Fix: Use deferReply(ephemeral) to acknowledge modal immediately to prevent "Something went wrong"
+      await interaction.deferReply({ ephemeral: true });
 
+      try {
         const name = interaction.fields.getTextInputValue('cat_name');
         const emoji = interaction.fields.getTextInputValue('cat_emoji');
         console.log(`[Modal] Inputs: name=${name}, emoji=${emoji}`);
 
+        // Insert into DB
         await db.query('INSERT INTO ticket_categories (guild_id, name, emoji) VALUES ($1, $2, $3)', [interaction.guildId, name, emoji]);
         console.log('[Modal] DB Insert success');
 
-
+        // Re-fetch data 
         const { rows: configRows } = await safeQuery('SELECT ticket_mode, ticket_parent_id FROM guild_configs WHERE guild_id = $1', [interaction.guildId]);
         const config = configRows[0] || {};
         const { rows: catRows } = await safeQuery('SELECT * FROM ticket_categories WHERE guild_id = $1', [interaction.guildId]);
@@ -3732,11 +3733,17 @@ client.on('interactionCreate', async interaction => {
           new ButtonBuilder().setCustomId('setup_back_btn').setLabel('Back').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
         );
 
-        await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+        // Update the dashboard message
+        if (interaction.message) {
+          await interaction.message.edit({ embeds: [embed], components: [row1, row2] });
+        }
+
+        // Confirm to user
+        await interaction.editReply({ content: '✅ Category added successfully!' });
 
       } catch (error) {
         console.error('Error adding ticket category:', error);
-        await interaction.followUp({ content: '❌ Failed to add category. Please check your emoji format or database connection.', ephemeral: true });
+        await interaction.editReply({ content: '❌ Failed to add category. Please check your emoji format or database connection.' });
       }
 
     } else if (interaction.customId === 'setup_tickets_del_cat_btn') {
