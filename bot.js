@@ -3704,8 +3704,13 @@ client.on('interactionCreate', async interaction => {
 
     } else if (interaction.customId === 'modal_add_ticket_cat') {
       console.log('[Modal] processing modal_add_ticket_cat');
-      // Fix: Use deferReply(ephemeral) to acknowledge modal immediately to prevent "Something went wrong"
-      await interaction.deferReply({ ephemeral: true });
+      // Attempt to acknowledge the modal submission immediately.
+      try {
+        await interaction.deferUpdate();
+      } catch (err) {
+        console.error('[Modal] Failed to deferUpdate:', err);
+        return;
+      }
 
       try {
         const name = interaction.fields.getTextInputValue('cat_name');
@@ -3753,11 +3758,11 @@ client.on('interactionCreate', async interaction => {
         }
 
         // Confirm to user
-        await interaction.editReply({ content: '✅ Category added successfully!' });
+        await interaction.followUp({ content: '✅ Category added successfully!', ephemeral: true });
 
       } catch (error) {
         console.error('Error adding ticket category:', error);
-        await interaction.editReply({ content: '❌ Failed to add category. Please check your emoji format or database connection.' });
+        await interaction.followUp({ content: '❌ Failed to add category. Please check your emoji format or database connection.', ephemeral: true });
       }
 
     } else if (interaction.customId === 'setup_tickets_del_cat_btn') {
