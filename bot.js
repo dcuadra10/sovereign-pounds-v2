@@ -5,6 +5,15 @@ const express = require('express');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 
+// Prevent process crashes on unhandled errors
+process.on('unhandledRejection', (reason, p) => {
+  console.error('Unhandled Rejection at:', p, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
 // Custom Emojis Configuration (Reverted to Unicode)
 /*
 const EMOJIS = {
@@ -3686,7 +3695,12 @@ client.on('interactionCreate', async interaction => {
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_name').setLabel('Category Name').setStyle(TextInputStyle.Short).setRequired(true)),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cat_emoji').setLabel('Emoji').setStyle(TextInputStyle.Short).setPlaceholder('e.g. 🎫').setRequired(true))
       );
-      await interaction.showModal(modal);
+      try {
+        await interaction.showModal(modal);
+      } catch (error) {
+        console.error('Error showing setup_tickets_add_cat_btn modal:', error);
+        // We cannot reply if the interaction is unknown/invalid, but we can log it.
+      }
 
     } else if (interaction.customId === 'modal_add_ticket_cat') {
       console.log('[Modal] processing modal_add_ticket_cat');
