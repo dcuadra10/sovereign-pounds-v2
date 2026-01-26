@@ -4526,8 +4526,7 @@ ${logOptions.commands !== false ? '✅' : '❌'} Commands • ${logOptions.serve
       await interaction.reply({ content: 'Select a question to edit:', components: [row, cancelRow], ephemeral: true });
       return;
 
-
-
+    } else if (interaction.customId.startsWith('wizard_finish_')) {
       await interaction.reply({ content: '✅ Setup finished! The category has been configured.', ephemeral: true });
       try { await interaction.channel.delete(); } catch (e) { }
       return;
