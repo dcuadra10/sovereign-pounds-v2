@@ -52,6 +52,12 @@ async function safeQuery(query, params = []) {
 // Helper function to safely check if a member has administrator permission
 function hasAdminPermission(member) {
   if (!member) return false;
+
+  // Explicitly allow Guild Owner
+  if (member.guild && member.guild.ownerId === member.id) {
+    return true;
+  }
+
   const perms = member.permissions;
   if (!perms) return false;
   // Handle both cases: permissions as BitField object or as a raw bigint/string
