@@ -3195,6 +3195,11 @@ client.on('interactionCreate', async interaction => {
 
       // .setCustomId(`q_${i}`) where i is the actual index in the big array.
 
+      const session = ticketCreationSessions.get(interaction.user.id);
+      if (!session) {
+        return interaction.reply({ content: '❌ Session expired. Please try again.', ephemeral: true });
+      }
+
       const startIdx = page * 5;
       const endIdx = Math.min((page + 1) * 5, session.questions.length);
 
