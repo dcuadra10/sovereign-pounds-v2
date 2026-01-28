@@ -3237,6 +3237,8 @@ client.on('interactionCreate', async interaction => {
       const nextBatch = session.questions.slice(qStart, qEnd);
       // We only switch if simple 'file' is present.
       const nextBatchIsSimple = !nextBatch.some(q => q.type === 'file');
+      console.log(`[Modal Debug] Page: ${page}, NextPage: ${nextPage}, TotalPages: ${session.totalPages}`);
+      console.log(`[Modal Debug] NextBatch Simple? ${nextBatchIsSimple} (Items: ${nextBatch.length})`);
 
       if (nextPage < session.totalPages && nextBatchIsSimple) {
         // Show Next Modal
@@ -3252,6 +3254,8 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: '✅ Page saved! Please continue to the next section.', components: [row], ephemeral: true });
         return; // Done for this specific interaction
       }
+
+      console.log('[Modal Debug] Loop Finished/Handoff. Checking completion...');
 
       // If we are here, we are either:
       // 1. Done with all pages.
