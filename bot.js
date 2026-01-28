@@ -3028,17 +3028,26 @@ client.on('interactionCreate', async interaction => {
       }
 
       let parsedQs = [];
+      let category = null;
       try {
-        const { rows } = await safeQuery('SELECT form_questions FROM ticket_categories WHERE id = $1', [catId]);
-        if (rows.length > 0 && rows[0].form_questions) {
-          const rawData = rows[0].form_questions;
-          if (typeof rawData === 'string') {
-            parsedQs = JSON.parse(rawData);
-          } else {
-            parsedQs = rawData;
+        const { rows } = await safeQuery('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
+        if (rows.length > 0) {
+          category = rows[0];
+          const rawData = category.form_questions;
+          if (rawData) {
+            if (typeof rawData === 'string') {
+              try { parsedQs = JSON.parse(rawData); } catch (e) { }
+            } else {
+              parsedQs = rawData;
+            }
           }
         }
       } catch (e) { console.error('Error fetching questions:', e); }
+
+      if (!category) {
+        // Fallback if category deleted mid-process?
+        category = { name: 'Support', id: catId };
+      }
 
       if (!parsedQs || parsedQs.length === 0) parsedQs = [{ text: 'Please describe your request:', type: 'text' }];
 
