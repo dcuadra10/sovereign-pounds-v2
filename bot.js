@@ -5527,11 +5527,12 @@ async function initiateTicketCreation(interaction, catId) {
       .setTitle(`Open Ticket: ${category.name.substring(0, 45)}`);
 
     parsedQs.slice(0, 5).forEach((q, i) => {
+      const qText = typeof q === 'object' ? q.text : q;
       modal.addComponents(new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId(`q_${i}`)
-          .setLabel(q.length > 45 ? q.substring(0, 42) + '...' : q)
-          .setPlaceholder(q.substring(0, 100))
+          .setLabel(qText.length > 45 ? qText.substring(0, 42) + '...' : qText)
+          .setPlaceholder(qText.substring(0, 100))
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(true)
       ));

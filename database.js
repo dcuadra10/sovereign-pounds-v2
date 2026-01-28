@@ -396,9 +396,11 @@ async function initializeDatabase() {
     // For safety, let's ALTER if exists or just create generic one.
     // If table exists with guild_id as PK, we should probably drop/recreate or migrate.
     // Given the previous code created it with guild_id PRIMARY KEY, we need to fix it.
+    /*
     try {
       await client.query(`DROP TABLE IF EXISTS ticket_panels`);
     } catch (e) { }
+    */
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS ticket_panels_v2 (
