@@ -3063,7 +3063,10 @@ client.on('interactionCreate', async interaction => {
       // Check if the FIRST batch (0-5) is simple text.
       // If so, start Modal. If not, start Thread Interview immediately.
       const firstBatch = parsedQs.slice(0, 5);
-      const startWithModal = !firstBatch.some(q => q.type && q.type !== 'text');
+      const firstBatch = parsedQs.slice(0, 5);
+      // ONLY 'file' type forces a switch to Interactive Mode immediately.
+      // 'dropdown' keys are now supported in Modals.
+      const startWithModal = !firstBatch.some(q => q.type === 'file');
 
       if (!startWithModal) {
         // Interactive Thread Mode (Immediate)
@@ -3158,14 +3161,27 @@ client.on('interactionCreate', async interaction => {
 
       parsedQs.slice(0, 5).forEach((q, i) => {
         const label = q.text || q;
-        modal.addComponents(new ActionRowBuilder().addComponents(
-          new TextInputBuilder()
-            .setCustomId(`q_${i}`)
-            .setLabel(label.length > 45 ? label.substring(0, 42) + '...' : label)
-            .setPlaceholder(label.substring(0, 100))
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true)
-        ));
+        const type = q.type || 'text';
+
+        if (type === 'dropdown' && q.options) {
+          // Add Select Menu
+          modal.addComponents(new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId(`q_${i}`)
+              .setPlaceholder(label.substring(0, 100))
+              .addOptions(q.options.map((opt, idx) => ({ label: opt.substring(0, 100), value: opt.substring(0, 100) })))
+          ));
+        } else {
+          // Default Text Input
+          modal.addComponents(new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId(`q_${i}`)
+              .setLabel(label.length > 45 ? label.substring(0, 42) + '...' : label)
+              .setPlaceholder(label.substring(0, 100))
+              .setStyle(TextInputStyle.Paragraph)
+              .setRequired(true)
+          ));
+        }
       });
 
       await interaction.showModal(modal);
@@ -3188,9 +3204,28 @@ client.on('interactionCreate', async interaction => {
       const endIdx = Math.min((page + 1) * 5, session.questions.length);
 
       for (let i = startIdx; i < endIdx; i++) {
-        const answer = interaction.fields.getTextInputValue(`q_${i}`);
+        let answer;
+        const q = session.questions[i];
+        const type = q.type || 'text';
+
+        if (type === 'dropdown') {
+          // For SelectMenu in Modal, we might need a different way to access value if getTextInputValue fails.
+          // But standard interaction.fields helpers usually expect TextInput.
+          // Let's try general field access.
+          try {
+            answer = interaction.fields.getField(`q_${i}`).values[0];
+          } catch (e) {
+            // Fallback if getField doesn't work (older versions)
+            // But we know interaction.fields is a ModalSubmitFields
+            // It wraps a Collection.
+            answer = 'Error retrieving selection';
+          }
+        } else {
+          answer = interaction.fields.getTextInputValue(`q_${i}`);
+        }
+
         // Store answer
-        session.answers[i] = { question: session.questions[i].text, answer: answer }; // Store question.text for consistency
+        session.answers[i] = { question: session.questions[i].text, answer: answer };
       }
 
       // Check for next page
@@ -3200,7 +3235,8 @@ client.on('interactionCreate', async interaction => {
       const qStart = nextPage * 5;
       const qEnd = Math.min((nextPage + 1) * 5, session.questions.length);
       const nextBatch = session.questions.slice(qStart, qEnd);
-      const nextBatchIsSimple = !nextBatch.some(q => q.type && q.type !== 'text');
+      // We only switch if simple 'file' is present.
+      const nextBatchIsSimple = !nextBatch.some(q => q.type === 'file');
 
       if (nextPage < session.totalPages && nextBatchIsSimple) {
         // Show Next Modal
@@ -3209,17 +3245,29 @@ client.on('interactionCreate', async interaction => {
           .setTitle(`Page ${nextPage + 1}/${session.totalPages}`);
 
         // ... logic to add components ...
+        // ... logic to add components ...
         nextBatch.forEach((q, i) => {
           const actualIndex = qStart + i;
           const qText = typeof q === 'object' ? q.text : q;
-          modal.addComponents(new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId(`q_${actualIndex}`)
-              .setLabel(qText.length > 45 ? qText.substring(0, 42) + '...' : qText)
-              .setPlaceholder(qText.substring(0, 100))
-              .setStyle(TextInputStyle.Paragraph)
-              .setRequired(true)
-          ));
+          const type = q.type || 'text';
+
+          if (type === 'dropdown' && q.options) {
+            modal.addComponents(new ActionRowBuilder().addComponents(
+              new StringSelectMenuBuilder()
+                .setCustomId(`q_${actualIndex}`)
+                .setPlaceholder(qText.substring(0, 100))
+                .addOptions(q.options.map((opt) => ({ label: opt.substring(0, 100), value: opt.substring(0, 100) })))
+            ));
+          } else {
+            modal.addComponents(new ActionRowBuilder().addComponents(
+              new TextInputBuilder()
+                .setCustomId(`q_${actualIndex}`)
+                .setLabel(qText.length > 45 ? qText.substring(0, 42) + '...' : qText)
+                .setPlaceholder(qText.substring(0, 100))
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true)
+            ));
+          }
         });
 
         await interaction.showModal(modal);
