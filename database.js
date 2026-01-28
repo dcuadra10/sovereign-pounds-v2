@@ -350,9 +350,11 @@ async function initializeDatabase() {
     // Migration to add form_questions if it doesn't exist
     try {
       await client.query(`ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS form_questions ${isSqlite ? 'TEXT' : 'JSONB'}`);
+      await client.query("ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS ticket_mode TEXT DEFAULT 'threads'");
+      await client.query('ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS parent_id TEXT');
     } catch (err) {
       // Ignore if column exists (though ADD COLUMN IF NOT EXISTS handles it in newer PG, node-pg might throw on syntax if old PG)
-      console.log('Safe migration: form_questions column check passed.');
+      console.log('Safe migration: form_questions/mode/parent_id column check passed.');
     }
 
     await client.query(`

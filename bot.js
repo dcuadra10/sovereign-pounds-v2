@@ -2761,6 +2761,12 @@ client.on('interactionCreate', async interaction => {
       const roleId = interaction.values[0];
       await db.query('INSERT INTO guild_configs (guild_id, auto_role_id) VALUES ($1, $2) ON CONFLICT (guild_id) DO UPDATE SET auto_role_id = $2', [interaction.guildId, roleId]);
       await interaction.update({ content: `✅ Auto-role set to <@&${roleId}>`, components: [] });
+
+    } else if (interaction.customId.startsWith('wizard_select_parent_')) {
+      const catId = interaction.customId.split('_')[3];
+      const channelId = interaction.values[0];
+      await db.query('UPDATE ticket_categories SET parent_id = $1 WHERE id = $2', [channelId, catId]);
+      await interaction.update({ content: `✅ Parent category set to <#${channelId}>.`, components: [] });
     }
   }
 
@@ -3061,21 +3067,38 @@ client.on('interactionCreate', async interaction => {
         await interaction.deferReply({ ephemeral: true });
 
         const guild = interaction.guild;
-        const safeName = interaction.user.username.replace(/[^a-zA-Z0-9-]/g, '');
+        const safeName = interaction.user.username.replace(/[^a-zA-Z0-9-]/g, '').substring(0, 10);
         const channelName = `ticket-${safeName}-${category.name}`.substring(0, 32);
 
+        const mode = category.ticket_mode || 'threads';
+        const parentId = category.parent_id;
+
         try {
-          const ticketThread = await interaction.channel.threads.create({
-            name: channelName,
-            type: ChannelType.PrivateThread,
-            reason: `Ticket created by ${interaction.user.tag}`,
-            autoArchiveDuration: 1440
-          });
-          await ticketThread.members.add(interaction.user.id);
+          let ticketChannel;
+          if (mode === 'channels') {
+            ticketChannel = await interaction.guild.channels.create({
+              name: channelName,
+              type: ChannelType.GuildText,
+              parent: parentId || interaction.guild.systemChannelId, // Fallback? Or just no parent
+              permissionOverwrites: [
+                { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+                { id: category.staff_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+              ]
+            });
+          } else {
+            ticketChannel = await interaction.channel.threads.create({
+              name: channelName,
+              type: ChannelType.PrivateThread,
+              reason: `Ticket created by ${interaction.user.tag}`,
+              autoArchiveDuration: 1440
+            });
+            await ticketChannel.members.add(interaction.user.id);
+          }
 
           await safeQuery(
             'INSERT INTO tickets (channel_id, guild_id, user_id, category_id, pending_questions, current_question_index, answers) VALUES ($1, $2, $3, $4, $5, 0, $6)',
-            [ticketThread.id, guild.id, interaction.user.id, category.id, JSON.stringify(parsedQs), JSON.stringify([])]
+            [ticketChannel.id, guild.id, interaction.user.id, category.id, JSON.stringify(parsedQs), JSON.stringify([])]
           );
 
           const welcomeEmbed = new EmbedBuilder()
@@ -3083,7 +3106,7 @@ client.on('interactionCreate', async interaction => {
             .setDescription(`Welcome <@${interaction.user.id}>!\n\nThis application has **${parsedQs.length}** questions.\nPlease answer them one by one below.`)
             .setColor('Green');
 
-          await ticketThread.send({ embeds: [welcomeEmbed] });
+          await ticketChannel.send({ embeds: [welcomeEmbed] });
 
           // Send First Question
           const firstQ = parsedQs[0];
@@ -3106,8 +3129,8 @@ client.on('interactionCreate', async interaction => {
             qEmbed.setFooter({ text: 'Please upload a file/image as your answer.' });
           }
 
-          await ticketThread.send({ embeds: [qEmbed], components: components });
-          await interaction.editReply({ content: `✅ Ticket created: <#${ticketThread.id}>` });
+          await ticketChannel.send({ embeds: [qEmbed], components: components });
+          await interaction.editReply({ content: `✅ Ticket created: <#${ticketChannel.id}>` });
           await interaction.message.edit({ components: interaction.message.components }); // reset menu
         } catch (err) {
           console.error('Error creating interview thread:', err);
@@ -3205,20 +3228,38 @@ client.on('interactionCreate', async interaction => {
       const ticketCategory = rowsCat[0];
 
       const guild = interaction.guild;
-      const channelName = `ticket-${interaction.user.username}-${ticketCategory.name}`;
+      const safeName = interaction.user.username.replace(/[^a-zA-Z0-9-]/g, '').substring(0, 10);
+      const channelName = `ticket-${safeName}-${ticketCategory.name}`.substring(0, 32);
+
+      const mode = ticketCategory.ticket_mode || 'threads';
+      const parentId = ticketCategory.parent_id;
 
       try {
-        const ticketThread = await interaction.channel.threads.create({
-          name: channelName,
-          type: ChannelType.PrivateThread,
-          reason: `Ticket created by ${interaction.user.tag}`,
-          autoArchiveDuration: 1440,
-        });
-        await ticketThread.members.add(interaction.user.id);
+        let ticketChannel;
+        if (mode === 'channels') {
+          ticketChannel = await interaction.guild.channels.create({
+            name: channelName,
+            type: ChannelType.GuildText,
+            parent: parentId || undefined,
+            permissionOverwrites: [
+              { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+              { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+              { id: ticketCategory.staff_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+            ]
+          });
+        } else {
+          ticketChannel = await interaction.channel.threads.create({
+            name: channelName,
+            type: ChannelType.PrivateThread,
+            reason: `Ticket created by ${interaction.user.tag}`,
+            autoArchiveDuration: 1440,
+          });
+          await ticketChannel.members.add(interaction.user.id);
+        }
 
         await db.query(
           'INSERT INTO tickets (channel_id, guild_id, user_id, category_id) VALUES ($1, $2, $3, $4)',
-          [ticketThread.id, guild.id, interaction.user.id, ticketCategory.id]
+          [ticketChannel.id, guild.id, interaction.user.id, ticketCategory.id]
         );
 
         const answerFields = session.answers.map(a => `**${a.question}**\n${a.answer}`).join('\n\n');
@@ -3236,8 +3277,8 @@ client.on('interactionCreate', async interaction => {
           new ButtonBuilder().setCustomId('close_ticket_btn').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
         );
 
-        await ticketThread.send({ embeds: [welcomeEmbed], components: [closeButtons] });
-        await interaction.reply({ content: `✅ Ticket created: <#${ticketThread.id}>`, ephemeral: true });
+        await ticketChannel.send({ embeds: [welcomeEmbed], components: [closeButtons] });
+        await interaction.reply({ content: `✅ Ticket created: <#${ticketChannel.id}>`, ephemeral: true });
 
         // Cleanup Session
         ticketCreationSessions.delete(interaction.user.id);
@@ -4581,21 +4622,27 @@ ${logOptions.commands !== false ? '✅' : '❌'} Commands • ${logOptions.serve
         .setDescription(`Configure advanced options for **${cat.name}**`)
         .addFields(
           { name: '🙋‍♂️ Claiming System', value: cat.claim_enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
-          { name: '🎁 Reward Role', value: cat.reward_role_id ? `<@&${cat.reward_role_id}>` : 'None', inline: true }
+          { name: '🎁 Reward Role', value: cat.reward_role_id ? `<@&${cat.reward_role_id}>` : 'None', inline: true },
+          { name: '📂 Ticket Mode', value: cat.ticket_mode === 'channels' ? '📝 Channels' : '🧵 Threads', inline: true },
+          { name: '🏗️ Parent Category', value: cat.parent_id ? `<#${cat.parent_id}>` : 'None (Default)', inline: true }
         )
         .setColor('Grey');
 
-      const row = new ActionRowBuilder().addComponents(
+      const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`wizard_toggle_claim_${catId}`).setLabel(cat.claim_enabled ? 'Disable Claiming' : 'Enable Claiming').setStyle(cat.claim_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`wizard_set_role_btn_${catId}`).setLabel('Set Reward Role').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`wizard_toggle_mode_${catId}`).setLabel('Toggle Threads/Channels').setStyle(ButtonStyle.Secondary)
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`wizard_set_parent_btn_${catId}`).setLabel('Set Parent Category').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`wizard_back_main_${catId}`).setLabel('Back').setStyle(ButtonStyle.Secondary)
       );
 
       // Check if updating or replying
       if (interaction.message.embeds[0].title === '⚙️ Category Settings') {
-        await interaction.update({ embeds: [embed], components: [row] });
+        await interaction.update({ embeds: [embed], components: [row1, row2] });
       } else {
-        await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+        await interaction.reply({ embeds: [embed], components: [row1, row2], ephemeral: true });
       }
 
     } else if (interaction.customId.startsWith('wizard_toggle_claim_')) {
@@ -4624,7 +4671,48 @@ ${logOptions.commands !== false ? '✅' : '❌'} Commands • ${logOptions.serve
         new ButtonBuilder().setCustomId(`wizard_back_main_${catId}`).setLabel('Back').setStyle(ButtonStyle.Secondary)
       );
 
-      await interaction.update({ embeds: [embed], components: [row] });
+      await interaction.update({ embeds: [embed], components: [row1, row2] });
+
+    } else if (interaction.customId.startsWith('wizard_toggle_mode_')) {
+      const catId = interaction.customId.split('_')[3];
+      // Toggle Mode
+      await db.query("UPDATE ticket_categories SET ticket_mode = CASE WHEN ticket_mode = 'channels' THEN 'threads' ELSE 'channels' END WHERE id = $1", [catId]);
+
+      // Refresh Settings
+      const { rows } = await safeQuery('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
+      const cat = rows[0];
+
+      const embed = new EmbedBuilder()
+        .setTitle('⚙️ Category Settings')
+        .setDescription(`Configure advanced options for **${cat.name}**`)
+        .addFields(
+          { name: '🙋‍♂️ Claiming System', value: cat.claim_enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+          { name: '🎁 Reward Role', value: cat.reward_role_id ? `<@&${cat.reward_role_id}>` : 'None', inline: true },
+          { name: '📂 Ticket Mode', value: cat.ticket_mode === 'channels' ? '📝 Channels' : '🧵 Threads', inline: true },
+          { name: '🏗️ Parent Category', value: cat.parent_id ? `<#${cat.parent_id}>` : 'None (Default)', inline: true }
+        )
+        .setColor('Grey');
+
+      const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`wizard_toggle_claim_${catId}`).setLabel(cat.claim_enabled ? 'Disable Claiming' : 'Enable Claiming').setStyle(cat.claim_enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`wizard_set_role_btn_${catId}`).setLabel('Set Reward Role').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`wizard_toggle_mode_${catId}`).setLabel('Toggle Threads/Channels').setStyle(ButtonStyle.Secondary)
+      );
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`wizard_set_parent_btn_${catId}`).setLabel('Set Parent Category').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`wizard_back_main_${catId}`).setLabel('Back').setStyle(ButtonStyle.Secondary)
+      );
+      await interaction.update({ embeds: [embed], components: [row1, row2] });
+
+    } else if (interaction.customId.startsWith('wizard_set_parent_btn_')) {
+      const catId = interaction.customId.split('_')[4];
+      const row = new ActionRowBuilder().addComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId(`wizard_select_parent_${catId}`)
+          .setPlaceholder('Select Parent Category')
+          .addChannelTypes(ChannelType.GuildCategory)
+      );
+      await interaction.reply({ content: 'Select the Discord Category where tickets will be created:', components: [row], ephemeral: true });
 
     } else if (interaction.customId.startsWith('wizard_set_role_btn_')) {
       const catId = interaction.customId.split('_')[4];
