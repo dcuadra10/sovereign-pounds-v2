@@ -3200,11 +3200,11 @@ client.on('interactionCreate', async interaction => {
 
       // If no more pages, CREATE TICKET
       // Fetch category info again for role/emoji
-      const { rows } = await db.query('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
-      const category = rows[0];
+      const { rows: rowsCat } = await db.query('SELECT * FROM ticket_categories WHERE id = $1', [catId]);
+      const ticketCategory = rowsCat[0];
 
       const guild = interaction.guild;
-      const channelName = `ticket-${interaction.user.username}-${category.name}`;
+      const channelName = `ticket-${interaction.user.username}-${ticketCategory.name}`;
 
       try {
         const ticketThread = await interaction.channel.threads.create({
@@ -3217,19 +3217,19 @@ client.on('interactionCreate', async interaction => {
 
         await db.query(
           'INSERT INTO tickets (channel_id, guild_id, user_id, category_id) VALUES ($1, $2, $3, $4)',
-          [ticketThread.id, guild.id, interaction.user.id, category.id]
+          [ticketThread.id, guild.id, interaction.user.id, ticketCategory.id]
         );
 
         const answerFields = session.answers.map(a => `**${a.question}**\n${a.answer}`).join('\n\n');
 
         const welcomeEmbed = new EmbedBuilder()
-          .setTitle(`${category.emoji} ${category.name} Ticket`)
-          .setDescription(`Welcome <@${interaction.user.id}>!\n\n${answerFields}\n\n<@&${category.staff_role_id}> will be with you shortly.`)
+          .setTitle(`${ticketCategory.emoji} ${ticketCategory.name} Ticket`)
+          .setDescription(`Welcome <@${interaction.user.id}>!\n\n${answerFields}\n\n<@&${ticketCategory.staff_role_id}> will be with you shortly.`)
           .setColor('Green');
 
         const closeButtons = new ActionRowBuilder();
-        if (category.claim_enabled) closeButtons.addComponents(new ButtonBuilder().setCustomId('claim_ticket_btn').setLabel('Claim').setStyle(ButtonStyle.Success).setEmoji('🙋‍♂️'));
-        if (category.reward_role_id) closeButtons.addComponents(new ButtonBuilder().setCustomId('accept_ticket_btn').setLabel('Accept & Reward').setStyle(ButtonStyle.Primary).setEmoji('✅'));
+        if (ticketCategory.claim_enabled) closeButtons.addComponents(new ButtonBuilder().setCustomId('claim_ticket_btn').setLabel('Claim').setStyle(ButtonStyle.Success).setEmoji('🙋‍♂️'));
+        if (ticketCategory.reward_role_id) closeButtons.addComponents(new ButtonBuilder().setCustomId('accept_ticket_btn').setLabel('Accept & Reward').setStyle(ButtonStyle.Primary).setEmoji('✅'));
         closeButtons.addComponents(
           new ButtonBuilder().setCustomId('close_ticket_reason_btn').setLabel('Close with Reason').setStyle(ButtonStyle.Secondary).setEmoji('📝'),
           new ButtonBuilder().setCustomId('close_ticket_btn').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
