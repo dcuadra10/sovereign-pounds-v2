@@ -1574,7 +1574,15 @@ client.on('interactionCreate', async interaction => {
           if (customEmojiMatch) {
             option.setEmoji(customEmojiMatch[1]); // Use ID
           } else {
-            option.setEmoji(cat.emoji || '🎫'); // Use Unicode
+            // Basic check: if it's purely ASCII text (letters/numbers) and not a known unicode symbol, it's likely invalid text like ":smile:"
+            // Emojis are typically multi-byte.
+            const isAscii = /^[\x00-\x7F]*$/.test(cat.emoji || '');
+            if (isAscii && (cat.emoji || '').length > 0) {
+              // It's likely invalid text, fallback
+              option.setEmoji('🎫');
+            } else {
+              option.setEmoji(cat.emoji || '🎫');
+            }
           }
 
           selectMenu.addOptions(option);
