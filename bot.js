@@ -3019,6 +3019,52 @@ client.on('interactionCreate', async interaction => {
       await db.query('UPDATE ticket_categories SET reward_role_id = $1 WHERE id = $2', [roleId || null, catId]);
       await interaction.reply({ content: `✅ Reward role updated to: ${roleId ? `<@&${roleId}>` : 'None'}`, ephemeral: true });
 
+    } else if (interaction.customId.startsWith('ticket_next_modal_')) {
+      const parts = interaction.customId.split('_');
+      const catId = parts[3];
+      const nextPage = parseInt(parts[4]);
+
+      const session = ticketCreationSessions.get(interaction.user.id);
+      if (!session) {
+        return interaction.reply({ content: '❌ Session expired. Please try again.', ephemeral: true });
+      }
+
+      // Re-calculate batch for this page
+      const qStart = nextPage * 5;
+      const qEnd = Math.min((nextPage + 1) * 5, session.questions.length);
+      const nextBatch = session.questions.slice(qStart, qEnd);
+
+      const modal = new ModalBuilder()
+        .setCustomId(`modal_ticket_submit_${catId}_${nextPage}`)
+        .setTitle(`Page ${nextPage + 1}/${session.totalPages}`);
+
+      nextBatch.forEach((q, i) => {
+        const actualIndex = qStart + i;
+        const qText = typeof q === 'object' ? q.text : q;
+        const type = q.type || 'text';
+
+        if (type === 'dropdown' && q.options) {
+          modal.addComponents(new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId(`q_${actualIndex}`)
+              .setPlaceholder(qText.substring(0, 100))
+              .addOptions(q.options.map((opt) => ({ label: opt.substring(0, 100), value: opt.substring(0, 100) })))
+          ));
+        } else {
+          modal.addComponents(new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId(`q_${actualIndex}`)
+              .setLabel(qText.length > 45 ? qText.substring(0, 42) + '...' : qText)
+              .setPlaceholder(qText.substring(0, 100))
+              .setStyle(TextInputStyle.Paragraph)
+              .setRequired(true)
+          ));
+        }
+      });
+
+      await interaction.showModal(modal);
+      try { await interaction.message.edit({ components: [], content: '✅ Continuing...' }); } catch (e) { }
+
     } else if (interaction.customId.startsWith('modal_ticket_create_') || interaction.customId.startsWith('modal_ticket_submit_')) {
       const parts = interaction.customId.split('_');
       // format: modal_ticket_submit_CATID_PAGE or modal_ticket_create_CATID (legacy)
@@ -3239,37 +3285,16 @@ client.on('interactionCreate', async interaction => {
 
       if (nextPage < session.totalPages && nextBatchIsSimple) {
         // Show Next Modal
-        const modal = new ModalBuilder()
-          .setCustomId(`modal_ticket_submit_${catId}_${nextPage}`)
-          .setTitle(`Page ${nextPage + 1}/${session.totalPages}`);
+        // Cannot chain modals directly from a Submit Interaction. Must reply with a button to open the next one.
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`ticket_next_modal_${catId}_${nextPage}`)
+            .setLabel(`Continue to Page ${nextPage + 1}`)
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('▶️')
+        );
 
-        // ... logic to add components ...
-        // ... logic to add components ...
-        nextBatch.forEach((q, i) => {
-          const actualIndex = qStart + i;
-          const qText = typeof q === 'object' ? q.text : q;
-          const type = q.type || 'text';
-
-          if (type === 'dropdown' && q.options) {
-            modal.addComponents(new ActionRowBuilder().addComponents(
-              new StringSelectMenuBuilder()
-                .setCustomId(`q_${actualIndex}`)
-                .setPlaceholder(qText.substring(0, 100))
-                .addOptions(q.options.map((opt) => ({ label: opt.substring(0, 100), value: opt.substring(0, 100) })))
-            ));
-          } else {
-            modal.addComponents(new ActionRowBuilder().addComponents(
-              new TextInputBuilder()
-                .setCustomId(`q_${actualIndex}`)
-                .setLabel(qText.length > 45 ? qText.substring(0, 42) + '...' : qText)
-                .setPlaceholder(qText.substring(0, 100))
-                .setStyle(TextInputStyle.Paragraph)
-                .setRequired(true)
-            ));
-          }
-        });
-
-        await interaction.showModal(modal);
+        await interaction.reply({ content: '✅ Page saved! Please continue to the next section.', components: [row], ephemeral: true });
         return; // Done for this specific interaction
       }
 
