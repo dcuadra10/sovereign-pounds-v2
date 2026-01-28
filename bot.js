@@ -3184,11 +3184,12 @@ client.on('interactionCreate', async interaction => {
           // Actually, standard practice across modals is fine to reuse IDs if different modal, 
           // BUT I used `q_${actualIndex}` in generation.
           const actualIndex = qStart + i;
+          const qText = typeof q === 'object' ? q.text : q;
           modal.addComponents(new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId(`q_${actualIndex}`)
-              .setLabel(q.text.length > 45 ? q.text.substring(0, 42) + '...' : q.text)
-              .setPlaceholder(q.text.substring(0, 100))
+              .setLabel(qText.length > 45 ? qText.substring(0, 42) + '...' : qText)
+              .setPlaceholder(qText.substring(0, 100))
               .setStyle(TextInputStyle.Paragraph)
               .setRequired(true)
           ));
